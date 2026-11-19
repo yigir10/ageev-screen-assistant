@@ -7,14 +7,21 @@
 	let { interactive }: { interactive: boolean } = $props();
 
 	let box: HTMLDivElement | undefined = $state();
+	let copiedIdx = $state(-1);
 	const names: HotkeyName[] = ['full', 'snip', 'toggle', 'visibility', 'marks', 'cancel', 'preset'];
 
-	// В Ghost показываем только последний ответ; в Interactive — всю переписку
 	const visible = $derived(
 		interactive ? session.messages : session.messages.filter((m) => m.role === 'assistant').slice(-1)
 	);
 
-	// автоскролл вниз при росте последнего сообщения
+	async function copyWhole(text: string, idx: number) {
+		try {
+			await navigator.clipboard.writeText(stripMarks(text));
+			copiedIdx = idx;
+			setTimeout(() => (copiedIdx = -1), 1200);
+		} catch {}
+	}
+
 	$effect(() => {
 		void session.messages.at(-1)?.text;
 		void session.messages.length;
@@ -45,8 +52,19 @@
 			</div>
 		{:else}
 			{@const isLast = m === session.messages.at(-1)}
-			<div class="max-w-full self-start rounded-[12px_12px_12px_4px] {interactive ? 'bg-surface px-3 py-2' : ''}">
+			<div class="group relative max-w-full self-start rounded-[12px_12px_12px_4px] {interactive ? 'bg-surface px-3 py-2' : ''}">
 				<Markdown text={stripMarks(m.text)} streaming={session.streaming && isLast} />
+				{#if interactive && m.text && !(session.streaming && isLast)}
+					<div class="mt-1.5 flex justify-end">
+						<button
+							type="button"
+							onclick={() => copyWhole(m.text, i)}
+							class="cursor-pointer rounded-md border border-line bg-hud-solid px-2 py-0.5 text-[10px] text-muted hover:border-accent hover:text-fg"
+						>
+							{copiedIdx === i ? 'Скопировано ✓' : 'Копировать ответ'}
+						</button>
+					</div>
+				{/if}
 			</div>
 		{/if}
 	{/each}

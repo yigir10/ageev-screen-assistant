@@ -13,7 +13,9 @@
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
     "@tauri-apps/plugin-autostart": "^2.0.0",
-    "@tauri-apps/plugin-global-shortcut": "^2.0.0"
+    "@tauri-apps/plugin-global-shortcut": "^2.0.0",
+    "@types/katex": "^0.16.8",
+    "katex": "^0.19.1"
   },
   "devDependencies": {
     "@sveltejs/adapter-static": "^3.0.0",

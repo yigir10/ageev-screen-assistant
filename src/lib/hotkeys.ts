@@ -20,7 +20,6 @@ function codeToKey(code: string): string | null {
 	return PASS_THROUGH.has(code) ? code : null;
 }
 
-/** KeyboardEvent -> строка акселератора для tauri-plugin-global-shortcut. Без модификатора — null (кроме F-клавиш). */
 export function eventToAccelerator(e: KeyboardEvent): string | null {
 	if (MODIFIER_CODES.has(e.code)) return null;
 	const key = codeToKey(e.code);
@@ -41,18 +40,16 @@ const PRETTY: Record<string, string> = {
 };
 
 export function prettyAccelerator(accel: string): string[] {
+	if (!accel.trim()) return ['—'];
 	return accel.split('+').map((p) => PRETTY[p] ?? p);
 }
 
 export async function unregisterHotkeys() {
 	try {
 		await unregisterAll();
-	} catch {
-		/* нечего снимать */
-	}
+	} catch {}
 }
 
-/** Регистрирует все бинды заново. Возвращает имена тех, что не удалось занять (конфликт с другим приложением / дубликат). */
 export async function registerHotkeys(
 	keys: Hotkeys,
 	handlers: Record<HotkeyName, () => void>
@@ -60,8 +57,10 @@ export async function registerHotkeys(
 	await unregisterHotkeys();
 	const failed: HotkeyName[] = [];
 	for (const name of Object.keys(keys) as HotkeyName[]) {
+		const accel = keys[name]?.trim();
+		if (!accel) continue;
 		try {
-			await register(keys[name], (ev) => {
+			await register(accel, (ev) => {
 				if (ev.state === 'Pressed') handlers[name]();
 			});
 		} catch {

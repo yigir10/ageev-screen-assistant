@@ -1,7 +1,19 @@
 <script lang="ts">
+	import { onMount } from 'svelte';
 	import { fly } from 'svelte/transition';
 	import { disable, enable, isEnabled } from '@tauri-apps/plugin-autostart';
-	import { addPreset, checkProxy, clearMarks, loadModels, quitApp, removePreset, resetPresets, testKey, toast } from '$lib/actions';
+	import {
+		addPreset,
+		checkProxy,
+		clearMarks,
+		clearPinnedRegion,
+		loadModels,
+		quitApp,
+		removePreset,
+		resetPresets,
+		testKey,
+		toast
+	} from '$lib/actions';
 	import { PRESETS, motion, settings, ui, type HotkeyName, type Provider } from '$lib/state.svelte';
 	import HotkeyField from './HotkeyField.svelte';
 	import Toggle from './Toggle.svelte';
@@ -15,27 +27,32 @@
 
 	let showKey = $state(false);
 	let busyKey = $state(false);
+	let busyModels = $state(false);
+	let autostart = $state(false);
+
+	const modelOptions = $derived([...new Set([...PRESETS[settings.provider], ...ui.models[settings.provider]])]);
+
+	onMount(() => {
+		void isEnabled()
+			.then((v) => (autostart = v))
+			.catch(() => {});
+	});
+
+	async function onAutostartChange(want: boolean) {
+		try {
+			if (want) await enable();
+			else await disable();
+		} catch (e) {
+			autostart = !want;
+			toast(`Автозапуск: ${e}`, 'error');
+		}
+	}
+
 	async function checkKey() {
 		busyKey = true;
 		await testKey();
 		busyKey = false;
 	}
-	let autostart = $state(false);
-	let autostartReady = false;
-
-	$effect(() => {
-		void isEnabled()
-			.then((v) => (autostart = v))
-			.catch(() => {})
-			.finally(() => (autostartReady = true));
-	});
-	$effect(() => {
-		const want = autostart;
-		if (!autostartReady) return;
-		void (want ? enable() : disable()).catch((e) => toast(`Автозапуск: ${e}`, 'error'));
-	});
-	let busyModels = $state(false);
-	const modelOptions = $derived([...new Set([...PRESETS[settings.provider], ...ui.models[settings.provider]])]);
 
 	async function fetchModels() {
 		busyModels = true;
@@ -43,19 +60,26 @@
 		busyModels = false;
 	}
 
-	const field = 'h-[34px] w-full rounded-ctl border border-line bg-surface px-2.5 text-[13px] text-fg outline-none focus:border-accent';
+	const field =
+		'h-[34px] w-full rounded-ctl border border-line bg-surface px-2.5 text-[13px] text-fg outline-none focus:border-accent';
 	const label = 'text-[11px] font-semibold tracking-wider text-muted uppercase';
 	const summary = 'cursor-pointer list-none py-2 text-[11px] font-semibold tracking-wider text-muted uppercase';
 </script>
 
 <aside
+	data-hit-area
 	transition:fly={{ x: 360, duration: motion(180) }}
 	aria-label="Настройки"
 	class="fixed top-4 right-4 bottom-4 z-40 flex w-[360px] flex-col overflow-hidden rounded-panel border border-accent bg-hud text-[13px] shadow-2xl"
 >
 	<div class="flex items-center justify-between border-b border-line px-3.5 py-3">
 		<span class="text-sm font-semibold">Настройки</span>
-		<button type="button" aria-label="Закрыть" onclick={() => (ui.settingsOpen = false)} class="h-[30px] w-[30px] cursor-pointer rounded-ctl border border-line bg-surface text-fg">✕</button>
+		<button
+			type="button"
+			aria-label="Закрыть"
+			onclick={() => (ui.settingsOpen = false)}
+			class="h-[30px] w-[30px] cursor-pointer rounded-ctl border border-line bg-surface text-fg">✕</button
+		>
 	</div>
 
 	<div class="flex-1 space-y-1 overflow-y-auto px-3.5 py-2 select-text">
@@ -68,7 +92,9 @@
 							type="button"
 							aria-pressed={settings.provider === id}
 							onclick={() => (settings.provider = id)}
-							class="h-[30px] flex-1 cursor-pointer rounded-md border-0 text-xs {settings.provider === id ? 'bg-accent font-semibold text-hud-solid' : 'bg-transparent text-muted'}"
+							class="h-[30px] flex-1 cursor-pointer rounded-md border-0 text-xs {settings.provider === id
+								? 'bg-accent font-semibold text-hud-solid'
+								: 'bg-transparent text-muted'}"
 						>{title}</button>
 					{/each}
 				</div>
@@ -82,10 +108,19 @@
 						placeholder={settings.provider === 'local' ? 'API-ключ (необязательно)' : 'API-ключ'}
 						bind:value={settings.apiKeys[settings.provider]}
 					/>
-					<button type="button" onclick={() => (showKey = !showKey)} class="h-[34px] flex-none cursor-pointer rounded-ctl border border-line bg-surface px-2.5 text-xs text-fg">{showKey ? 'Скрыть' : 'Показать'}</button>
+					<button
+						type="button"
+						onclick={() => (showKey = !showKey)}
+						class="h-[34px] flex-none cursor-pointer rounded-ctl border border-line bg-surface px-2.5 text-xs text-fg"
+					>{showKey ? 'Скрыть' : 'Показать'}</button>
 				</div>
 
-				<button type="button" onclick={checkKey} disabled={busyKey} class="h-[34px] cursor-pointer rounded-ctl border border-accent bg-transparent text-xs text-accent disabled:opacity-50">
+				<button
+					type="button"
+					onclick={checkKey}
+					disabled={busyKey}
+					class="h-[34px] cursor-pointer rounded-ctl border border-accent bg-transparent text-xs text-accent disabled:opacity-50"
+				>
 					{busyKey ? 'Проверяю…' : 'Проверить ключ и соединение'}
 				</button>
 
@@ -108,7 +143,12 @@
 				<datalist id="model-options">
 					{#each modelOptions as m (m)}<option value={m}></option>{/each}
 				</datalist>
-				<button type="button" onclick={fetchModels} disabled={busyModels} class="h-[34px] cursor-pointer rounded-ctl border border-accent bg-transparent text-xs text-accent disabled:opacity-50">
+				<button
+					type="button"
+					onclick={fetchModels}
+					disabled={busyModels}
+					class="h-[34px] cursor-pointer rounded-ctl border border-accent bg-transparent text-xs text-accent disabled:opacity-50"
+				>
 					{busyModels ? 'Загрузка…' : 'Загрузить список по API'}
 				</button>
 			</div>
@@ -134,10 +174,21 @@
 		</details>
 
 		<details open>
-			<summary class={summary}>Stealth</summary>
-			<div class="flex items-center justify-between pb-3">
-				<span>Скрывать от записи экрана</span>
-				<Toggle label="Stealth" bind:checked={settings.stealth} />
+			<summary class={summary}>Захват и Stealth</summary>
+			<div class="flex flex-col gap-2 pb-3">
+				<div class="flex items-center justify-between">
+					<span>Скрывать от записи экрана</span>
+					<Toggle label="Stealth" bind:checked={settings.stealth} />
+				</div>
+				{#if settings.pinnedRegion}
+					<button
+						type="button"
+						onclick={clearPinnedRegion}
+						class="h-[30px] cursor-pointer rounded-ctl border border-line bg-surface text-xs text-fg"
+					>
+						Сбросить область ({Math.round(settings.pinnedRegion.w)}×{Math.round(settings.pinnedRegion.h)}) на весь экран
+					</button>
+				{/if}
 			</div>
 		</details>
 
@@ -151,14 +202,13 @@
 				</label>
 				<div class="flex items-center justify-between"><span>Сетка на скриншоте (точнее)</span><Toggle label="Сетка" bind:checked={settings.marksGrid} /></div>
 				<button type="button" onclick={clearMarks} class="h-[30px] cursor-pointer rounded-ctl border border-line bg-surface text-xs text-fg">Очистить сейчас</button>
-				<span class="text-[11px] text-muted">Метки точны примерно. Для мелких элементов выделяйте меньшую область.</span>
 			</div>
 		</details>
 
 		<details>
 			<summary class={summary}>Пресеты запросов</summary>
 			<div class="flex flex-col gap-2.5 pb-3">
-				<span class="text-[11px] text-muted">Активный пресет (●) используется при каждом захвате. В чате клик по пресету сразу задаёт вопрос по текущему скриншоту.</span>
+				<span class="text-[11px] text-muted">Активный пресет (●) используется при каждом скрине. В чате двойной клик по пресету сразу переспрашивает по текущему скриншоту.</span>
 				{#each settings.presets as p (p.id)}
 					<div class="flex flex-col gap-1.5 rounded-ctl border p-2 {settings.activePreset === p.id ? 'border-accent' : 'border-line'}">
 						<div class="flex gap-1.5">
@@ -185,9 +235,12 @@
 		<details>
 			<summary class={summary}>Система</summary>
 			<div class="flex flex-col gap-2 pb-3">
-				<div class="flex items-center justify-between"><span>Запускать с Windows</span><Toggle label="Автозапуск" bind:checked={autostart} /></div>
+				<div class="flex items-center justify-between">
+					<span>Запускать с Windows</span>
+					<Toggle label="Автозапуск" bind:checked={autostart} onchange={onAutostartChange} />
+				</div>
 				<button type="button" onclick={quitApp} class="h-[30px] cursor-pointer rounded-ctl border border-danger bg-transparent text-xs text-danger">Выйти из приложения</button>
-				<span class="text-[11px] text-muted">Также доступно из иконки в трее. API-ключи хранятся в Windows Credential Manager.</span>
+				<span class="text-[11px] text-muted">API-ключи хранятся в Windows Credential Manager.</span>
 			</div>
 		</details>
 

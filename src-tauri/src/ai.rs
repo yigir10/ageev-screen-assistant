@@ -1,5 +1,5 @@
 //! Мульти-провайдерный стриминг: Gemini (нативный SSE), OpenRouter и Local (OpenAI-совместимые).
-//! Ответ уходит во фронтенд событиями: `ai-chunk`, `ai-done`, `ai-error`.
+//! Ответ уходит во фронтенд событиями: `ai-chunk`, `ai-status`, `ai-done`, `ai-error`.
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -14,13 +14,13 @@ const LOCAL_DEFAULT: &str = "http://127.0.0.1:8080/v1";
 #[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct AiConfig {
-    pub provider: String, // "gemini" | "openrouter" | "local"
+    pub provider: String,
     #[serde(default)]
     pub api_key: String,
     #[serde(default)]
     pub model: String,
     #[serde(default)]
-    pub base_url: String, // только для local
+    pub base_url: String,
     #[serde(default)]
     pub proxy: Option<String>,
     #[serde(default)]
@@ -29,14 +29,19 @@ pub struct AiConfig {
 
 #[derive(Deserialize, Clone)]
 pub struct ChatMsg {
-    pub role: String, // "user" | "assistant"
+    pub role: String,
     pub text: String,
     #[serde(default)]
-    pub image: Option<String>, // base64 JPEG без префикса
+    pub image: Option<String>,
 }
 
 #[derive(Serialize, Clone)]
 struct ChunkEvt {
+    id: u64,
+    text: String,
+}
+#[derive(Serialize, Clone)]
+struct StatusEvt {
     id: u64,
     text: String,
 }
@@ -58,7 +63,6 @@ fn build_client(cfg: &AiConfig, timeout: Option<Duration>) -> Result<reqwest::Cl
     if let Some(t) = timeout {
         b = b.timeout(t);
     }
-    // Локальный сервер всегда идёт напрямую
     if cfg.provider != "local" {
         if let Some(p) = cfg.proxy.as_ref().map(|s| s.trim()).filter(|s| !s.is_empty()) {
             b = b.proxy(reqwest::Proxy::all(p).map_err(|e| format!("Прокси: {e}"))?);
@@ -73,8 +77,7 @@ fn local_base(cfg: &AiConfig) -> String {
 }
 
 fn short(s: &str) -> String {
-    let t: String = s.chars().take(400).collect();
-    t
+    s.chars().take(400).collect()
 }
 
 fn gemini_body(cfg: &AiConfig, msgs: &[ChatMsg]) -> Value {
@@ -166,7 +169,6 @@ async fn run_stream(app: &AppHandle, cfg: &AiConfig, msgs: &[ChatMsg], id: u64) 
         other => return Err(format!("Неизвестный провайдер: {other}")),
     };
 
-    // До первого чанка повторяем запрос при 429/5xx и сетевых сбоях (backoff 1с, 2с, 4с)
     let mut attempt = 0u32;
     let resp = loop {
         let this = req.try_clone().ok_or("Не удалось повторить запрос")?;
@@ -175,7 +177,15 @@ async fn run_stream(app: &AppHandle, cfg: &AiConfig, msgs: &[ChatMsg], id: u64) 
             Ok(r) => {
                 let st = r.status();
                 if (st.as_u16() == 429 || st.is_server_error()) && attempt < 3 {
-                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
+                    let wait = 1u64 << attempt;
+                    let _ = app.emit(
+                        "ai-status",
+                        StatusEvt {
+                            id,
+                            text: format!("Повтор {}/3 через {wait} с (HTTP {})…", attempt + 1, st.as_u16()),
+                        },
+                    );
+                    tokio::time::sleep(Duration::from_secs(wait)).await;
                     attempt += 1;
                     continue;
                 }
@@ -184,7 +194,15 @@ async fn run_stream(app: &AppHandle, cfg: &AiConfig, msgs: &[ChatMsg], id: u64) 
             }
             Err(e) => {
                 if attempt < 3 && (e.is_connect() || e.is_timeout()) {
-                    tokio::time::sleep(Duration::from_secs(1 << attempt)).await;
+                    let wait = 1u64 << attempt;
+                    let _ = app.emit(
+                        "ai-status",
+                        StatusEvt {
+                            id,
+                            text: format!("Сбой сети, повтор {}/3 через {wait} с…", attempt + 1),
+                        },
+                    );
+                    tokio::time::sleep(Duration::from_secs(wait)).await;
                     attempt += 1;
                     continue;
                 }
@@ -198,7 +216,6 @@ async fn run_stream(app: &AppHandle, cfg: &AiConfig, msgs: &[ChatMsg], id: u64) 
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(|e| format!("Поток: {e}"))?;
         buf.extend_from_slice(&chunk);
-        // Режем по '\n' на уровне байт, чтобы не ломать UTF-8 на границе чанков
         while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
             let raw: Vec<u8> = buf.drain(..=pos).collect();
             let line = String::from_utf8_lossy(&raw);
@@ -254,7 +271,6 @@ pub fn cancel_chat(state: State<'_, StreamState>) {
     }
 }
 
-/// Динамическая подгрузка списка моделей (для Gemini и OpenRouter — только мультимодальные).
 #[tauri::command]
 pub async fn fetch_models(cfg: AiConfig) -> Result<Vec<String>, String> {
     let client = build_client(&cfg, Some(Duration::from_secs(20)))?;
@@ -316,7 +332,6 @@ pub async fn fetch_models(cfg: AiConfig) -> Result<Vec<String>, String> {
     Ok(ids)
 }
 
-/// Проверка прокси: возвращает задержку в мс.
 #[tauri::command]
 pub async fn test_proxy(proxy: String) -> Result<u64, String> {
     let cfg = AiConfig {
@@ -335,7 +350,6 @@ pub async fn test_proxy(proxy: String) -> Result<u64, String> {
     Ok(t.elapsed().as_millis() as u64)
 }
 
-/// Проверка ключа/доступа: лёгкий запрос списка моделей. Возвращает задержку в мс.
 #[tauri::command]
 pub async fn test_key(cfg: AiConfig) -> Result<u64, String> {
     let client = build_client(&cfg, Some(Duration::from_secs(15)))?;

@@ -10,7 +10,7 @@
 
 	function start() {
 		recording = true;
-		ui.recording = true; // на время записи глобальные бинды снимаются, чтобы нажатие не сработало как команда
+		ui.recording = true;
 		warning = '';
 	}
 	function stop() {
@@ -28,7 +28,9 @@
 			warning = 'Нужен модификатор (Ctrl / Alt / Shift) и клавиша';
 			return;
 		}
-		const clash = (Object.keys(settings.hotkeys) as HotkeyName[]).find((n) => n !== name && settings.hotkeys[n] === accel);
+		const clash = (Object.keys(settings.hotkeys) as HotkeyName[]).find(
+			(n) => n !== name && settings.hotkeys[n] === accel
+		);
 		if (clash) {
 			warning = `Конфликт с «${HOTKEY_LABELS[clash]}»`;
 			return;
@@ -41,22 +43,42 @@
 		settings.hotkeys[name] = DEFAULT_HOTKEYS[name];
 		warning = '';
 	}
+
+	function clear() {
+		settings.hotkeys[name] = '';
+		warning = '';
+	}
 </script>
 
 <div class="flex flex-col gap-1">
 	<div class="flex items-center justify-between gap-2">
 		<span>{HOTKEY_LABELS[name]}</span>
-		<div class="flex items-center gap-1.5">
+		<div class="flex items-center gap-1">
 			<button
 				type="button"
 				{onkeydown}
 				onclick={start}
 				onblur={stop}
-				class="min-h-[30px] cursor-pointer rounded-md border bg-surface px-2 {recording ? 'border-accent text-accent' : 'border-line'}"
+				class="min-h-[30px] cursor-pointer rounded-md border bg-surface px-2 {recording
+					? 'border-accent text-accent'
+					: 'border-line'}"
 			>
 				{#if recording}Нажмите комбинацию…{:else}<Kbd accel={settings.hotkeys[name]} />{/if}
 			</button>
-			<button type="button" aria-label="Сбросить хоткей" onclick={reset} class="h-[30px] cursor-pointer rounded-md border border-line bg-surface px-2 text-muted hover:text-fg">↺</button>
+			<button
+				type="button"
+				title="Отключить хоткей"
+				aria-label="Отключить хоткей"
+				onclick={clear}
+				class="h-[30px] cursor-pointer rounded-md border border-line bg-surface px-2 text-muted hover:text-danger">✕</button
+			>
+			<button
+				type="button"
+				title="Сбросить к стандартному"
+				aria-label="Сбросить хоткей"
+				onclick={reset}
+				class="h-[30px] cursor-pointer rounded-md border border-line bg-surface px-2 text-muted hover:text-fg">↺</button
+			>
 		</div>
 	</div>
 	{#if warning}<span class="text-[11px] text-warn">{warning}</span>{/if}

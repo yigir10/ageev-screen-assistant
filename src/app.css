@@ -1,7 +1,8 @@
+@import 'katex/dist/katex.min.css';
 @import 'tailwindcss';
 
 @theme {
-	--color-hud: rgba(10, 12, 18, 0.82);
+	--color-hud: rgba(10, 12, 18, 0.84);
 	--color-hud-solid: #0b0d12;
 	--color-surface: #151922;
 	--color-line: rgba(255, 255, 255, 0.08);
@@ -19,7 +20,7 @@
 
 html,
 body {
-	background: transparent !important; /* WebView полностью прозрачный */
+	background: transparent !important;
 	margin: 0;
 	height: 100%;
 	overflow: hidden;
@@ -33,7 +34,12 @@ textarea {
 	font-family: inherit;
 }
 
-/* Мигающий курсор стрима */
+.katex-display {
+	overflow-x: auto;
+	overflow-y: hidden;
+	margin: 0.45rem 0;
+}
+
 .caret {
 	animation: caret-blink 1s steps(2, start) infinite;
 	color: var(--color-accent);

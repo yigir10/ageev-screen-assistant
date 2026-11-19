@@ -1,12 +1,19 @@
-// Бизнес-логика: режимы окна, захват, чат со стримингом, хоткеи. Работает поверх rune-store.
-
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import { tick } from 'svelte';
 import { registerHotkeys, unregisterHotkeys } from './hotkeys';
 import { extractMarks, GRID_PROMPT, MARKS_PROMPT } from './marks';
 import { friendlyError } from './errors';
-import { DEFAULT_PRESETS, HOTKEY_LABELS, history, session, settings, ui, type HotkeyName, type Mode } from './state.svelte';
+import {
+	DEFAULT_PRESETS,
+	HOTKEY_LABELS,
+	history,
+	session,
+	settings,
+	ui,
+	type HotkeyName,
+	type Mode
+} from './state.svelte';
 
 let reqId = 0;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -19,16 +26,18 @@ export function toast(text: string, kind: 'info' | 'error' | 'ok' = 'info') {
 	}, 4500);
 }
 
-// ───────────── режимы окна ─────────────
+// ───────────── режимы окна и шторки ─────────────
 
 export async function setMode(mode: Mode) {
 	ui.mode = mode;
+	if (mode !== 'ghost') ui.hidden = false;
 	if (mode !== 'interactive') {
 		ui.settingsOpen = false;
 		ui.historyOpen = false;
+		ui.dragging = false;
 	}
 	try {
-		await invoke('set_interactive', { interactive: mode !== 'ghost' });
+		await invoke('set_window_mode', { mode });
 	} catch (e) {
 		toast(String(e), 'error');
 	}
@@ -38,7 +47,19 @@ export const toggleMode = () => setMode(ui.mode === 'ghost' ? 'interactive' : 'g
 
 export function toggleVisibility() {
 	ui.hidden = !ui.hidden;
-	if (ui.hidden && ui.mode !== 'ghost') setMode('ghost');
+	if (ui.hidden && ui.mode !== 'ghost') void setMode('ghost');
+}
+
+export function openSettings(open?: boolean) {
+	const next = open ?? !ui.settingsOpen;
+	ui.settingsOpen = next;
+	if (next) ui.historyOpen = false;
+}
+
+export function openHistory(open?: boolean) {
+	const next = open ?? !ui.historyOpen;
+	ui.historyOpen = next;
+	if (next) ui.settingsOpen = false;
 }
 
 export async function applyStealth() {
@@ -49,9 +70,8 @@ export async function applyStealth() {
 	}
 }
 
-// ───────────── захват экрана ─────────────
+// ───────────── захват экрана и закреплённая область ─────────────
 
-/** Если stealth выключен, на время захвата прячем свой UI, чтобы он не попал в кадр. */
 async function hideUiForCapture() {
 	if (settings.stealth) return;
 	ui.capturing = true;
@@ -66,11 +86,14 @@ async function capture(
 	args?: Record<string, unknown>,
 	skipHide = false
 ) {
+	await cancel();
+	ui.hidden = false;
 	if (!skipHide) await hideUiForCapture();
 	ui.phase = 'capturing';
+	ui.statusDetail = '';
 	try {
 		const image = await invoke<string>(cmd, args);
-		session.frame = frame; // координаты меток модели привязываются к этой области
+		session.frame = frame;
 		beginChat(image);
 	} catch (e) {
 		ui.phase = 'idle';
@@ -82,11 +105,44 @@ async function capture(
 
 const useGrid = () => settings.marksEnabled && settings.marksGrid;
 
-export const captureFull = () =>
-	capture('capture_full', { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }, { grid: useGrid() });
+function clampRect(r: Rect): Rect | null {
+	const maxW = window.innerWidth;
+	const maxH = window.innerHeight;
+	const x = Math.max(0, Math.min(r.x, maxW - 10));
+	const y = Math.max(0, Math.min(r.y, maxH - 10));
+	const w = Math.min(r.w, maxW - x);
+	const h = Math.min(r.h, maxH - y);
+	return w >= 10 && h >= 10 ? { x, y, w, h } : null;
+}
 
-/** Режим выделения: сначала замораживаем кадр в ОЗУ (картинка не поменяется, пока выделяешь), потом показываем оверлей. */
+/** Быстрый «Скрин»: если область закреплена — снимает её мгновенно, иначе — весь экран. */
+export async function captureFull() {
+	const pinned = settings.pinnedRegion ? clampRect(settings.pinnedRegion) : null;
+	if (pinned) {
+		const dpr = window.devicePixelRatio || 1;
+		await capture('capture_region', pinned, {
+			region: {
+				x: Math.round(pinned.x * dpr),
+				y: Math.round(pinned.y * dpr),
+				w: Math.round(pinned.w * dpr),
+				h: Math.round(pinned.h * dpr)
+			},
+			grid: useGrid(),
+			useCached: false
+		});
+		return;
+	}
+	await capture('capture_full', { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight }, { grid: useGrid() });
+}
+
+export function clearPinnedRegion() {
+	settings.pinnedRegion = null;
+	toast('Сброшено: быстрый скрин снимает весь экран', 'info');
+}
+
 export async function startSnip() {
+	await cancel();
+	ui.hidden = false;
 	await hideUiForCapture();
 	try {
 		ui.snipBg = await invoke<string>('snapshot_begin');
@@ -112,12 +168,13 @@ export interface Rect {
 	h: number;
 }
 
-/** rect — в CSS-пикселях окна; в Rust уходят физические пиксели (× devicePixelRatio). */
+/** Выделение области: запоминает зону для быстрого скрина и сразу отправляет её в ИИ. */
 export async function captureRegion(rect: Rect) {
 	const dpr = window.devicePixelRatio || 1;
 	const cached = !!ui.snipBg;
 	ui.snipBg = '';
-	await setMode('ghost'); // убираем затемнение и возвращаемся в Ghost
+	settings.pinnedRegion = { ...rect };
+	await setMode('ghost');
 	await capture(
 		'capture_region',
 		rect,
@@ -131,21 +188,26 @@ export async function captureRegion(rect: Rect) {
 			grid: useGrid(),
 			useCached: cached
 		},
-		cached // кадр уже снят заранее — прятать UI не нужно
+		cached
 	);
 }
 
-// ───────────── чат ─────────────
+// ───────────── чат и пресеты ─────────────
 
 const proxyOn = () => settings.proxyEnabled && settings.proxyUrl.trim() !== '';
 
-function activePrompt(): string {
+export function activePrompt(): string {
 	const p = settings.presets.find((x) => x.id === settings.activePreset) ?? settings.presets[0];
 	return p?.prompt.trim() || 'Проанализируй скриншот и ответь на то, что на нём спрашивается или требуется сделать.';
 }
 
-/** Выбрать пресет; если скриншот уже есть — сразу задать этот вопрос по нему. */
-export function usePreset(id: string) {
+/** Одиночный клик только переключает активный пресет (без лишней траты API). */
+export function selectPreset(id: string) {
+	settings.activePreset = id;
+}
+
+/** Повторный прогон по текущему скриншоту выбранным пресетом (двойной клик). */
+export function runPresetNow(id: string) {
 	settings.activePreset = id;
 	if (session.messages.length && !session.streaming) ask(activePrompt());
 }
@@ -173,19 +235,37 @@ export function resetPresets() {
 	settings.activePreset = DEFAULT_PRESETS[0].id;
 }
 
-function beginChat(image: string) {
+function beginChat(image: string, customText?: string) {
 	session.id = crypto.randomUUID();
+	session.fromHistory = false;
 	session.messages = [
-		{ role: 'user', text: activePrompt(), image },
+		{ role: 'user', text: customText?.trim() || activePrompt(), image },
 		{ role: 'assistant', text: '' }
 	];
 	void send();
 }
 
-export function ask(text: string) {
+/** Текстовый вопрос работает как с историей, так и с нуля (или с картинкой из буфера Ctrl+V). */
+export function ask(text: string, pastedImage?: string | null) {
 	const t = text.trim();
-	if (!t || session.streaming || session.messages.length === 0) return;
-	session.messages.push({ role: 'user', text: t }, { role: 'assistant', text: '' });
+	if (session.streaming) return;
+	if (!t && !pastedImage) return;
+
+	if (session.messages.length === 0) {
+		session.id = crypto.randomUUID();
+		session.fromHistory = false;
+		session.frame = { x: 0, y: 0, w: window.innerWidth, h: window.innerHeight };
+		session.messages = [
+			{ role: 'user', text: t || activePrompt(), image: pastedImage ?? undefined },
+			{ role: 'assistant', text: '' }
+		];
+	} else {
+		if (pastedImage) session.fromHistory = false;
+		session.messages.push(
+			{ role: 'user', text: t || activePrompt(), image: pastedImage ?? undefined },
+			{ role: 'assistant', text: '' }
+		);
+	}
 	void send();
 }
 
@@ -195,21 +275,24 @@ async function send() {
 	session.streaming = true;
 	session.error = '';
 	ui.phase = 'thinking';
+	ui.statusDetail = '';
 	clearMarks();
-	// Скриншот есть только в первом сообщении; длинную историю обрезаем, первое сообщение сохраняем
+
 	const all = session.messages.slice(0, -1);
 	const trimmed = all.length > 13 ? [all[0], ...all.slice(-12)] : all;
-	const history = trimmed.map((m) => ({ role: m.role, text: m.text, image: m.image ?? null }));
+	const payload = trimmed.map((m) => ({ role: m.role, text: m.text, image: m.image ?? null }));
 	const cfg = {
 		provider: p,
 		apiKey: settings.apiKeys[p],
 		model: settings.models[p],
 		baseUrl: settings.localBaseUrl,
-		proxy: settings.proxyEnabled && settings.proxyUrl.trim() ? settings.proxyUrl.trim() : null,
-		systemPrompt: settings.systemPrompt + (settings.marksEnabled ? MARKS_PROMPT + (settings.marksGrid ? GRID_PROMPT : '') : '')
+		proxy: proxyOn() ? settings.proxyUrl.trim() : null,
+		systemPrompt:
+			settings.systemPrompt +
+			(settings.marksEnabled ? MARKS_PROMPT + (settings.marksGrid ? GRID_PROMPT : '') : '')
 	};
 	try {
-		await invoke('stream_chat', { cfg, messages: history, requestId: id });
+		await invoke('stream_chat', { cfg, messages: payload, requestId: id });
 	} catch (e) {
 		fail(String(e));
 	}
@@ -218,6 +301,7 @@ async function send() {
 function fail(message: string) {
 	session.streaming = false;
 	ui.phase = 'idle';
+	ui.statusDetail = '';
 	message = friendlyError(message, settings.provider, proxyOn());
 	session.error = message;
 	const last = session.messages.at(-1);
@@ -225,7 +309,6 @@ function fail(message: string) {
 	toast(message, 'error');
 }
 
-/** Повторить последний запрос (после ошибки или чтобы получить другой ответ). */
 export function retry() {
 	if (session.streaming) return;
 	if (session.messages.at(-1)?.role === 'assistant') session.messages.pop();
@@ -238,6 +321,7 @@ export async function cancel() {
 	await invoke('cancel_chat').catch(() => {});
 	session.streaming = false;
 	ui.phase = 'idle';
+	ui.statusDetail = '';
 }
 
 // ───────────── разметка на экране ─────────────
@@ -264,18 +348,26 @@ export function clearChat() {
 	session.messages = [];
 	session.id = '';
 	session.error = '';
+	session.fromHistory = false;
 }
 
-// ───────────── ключи в Windows Credential Manager ─────────────
+// ───────────── ключи в Windows Credential Manager (с дебаунсом и диффом) ─────────────
 
 const PROVIDERS = ['gemini', 'openrouter', 'local'] as const;
+const lastSavedKeys: Record<(typeof PROVIDERS)[number], string> = { gemini: '', openrouter: '', local: '' };
+const saveTimers: Partial<Record<(typeof PROVIDERS)[number], ReturnType<typeof setTimeout>>> = {};
 
 export async function loadSecrets() {
 	try {
 		for (const p of PROVIDERS) {
 			const v = await invoke<string | null>('secret_get', { name: `apikey-${p}` });
-			if (v) settings.apiKeys[p] = v;
-			else if (settings.apiKeys[p]) await invoke('secret_set', { name: `apikey-${p}`, value: settings.apiKeys[p] }); // миграция из localStorage
+			if (v) {
+				settings.apiKeys[p] = v;
+				lastSavedKeys[p] = v;
+			} else if (settings.apiKeys[p]) {
+				await invoke('secret_set', { name: `apikey-${p}`, value: settings.apiKeys[p] });
+				lastSavedKeys[p] = settings.apiKeys[p];
+			}
 		}
 		ui.secretsOk = true;
 	} catch (e) {
@@ -284,9 +376,13 @@ export async function loadSecrets() {
 	}
 }
 
-export async function saveSecret(p: (typeof PROVIDERS)[number], value: string) {
-	if (!ui.secretsOk) return;
-	await invoke('secret_set', { name: `apikey-${p}`, value }).catch((e) => toast(String(e), 'error'));
+export function scheduleSaveSecret(p: (typeof PROVIDERS)[number], value: string) {
+	if (!ui.secretsOk || lastSavedKeys[p] === value) return;
+	clearTimeout(saveTimers[p]);
+	saveTimers[p] = setTimeout(() => {
+		lastSavedKeys[p] = value;
+		void invoke('secret_set', { name: `apikey-${p}`, value }).catch((e) => toast(String(e), 'error'));
+	}, 400);
 }
 
 export const quitApp = () => invoke('quit_app');
@@ -299,19 +395,25 @@ export async function initEvents(): Promise<UnlistenFn[]> {
 			else if (e.payload === 'interactive') void setMode('interactive');
 			else if (e.payload === 'settings') {
 				void setMode('interactive');
-				ui.settingsOpen = true;
+				openSettings(true);
 			}
+		}),
+		await listen<{ id: number; text: string }>('ai-status', (e) => {
+			if (e.payload.id !== reqId) return;
+			ui.statusDetail = e.payload.text;
 		}),
 		await listen<{ id: number; text: string }>('ai-chunk', (e) => {
 			if (e.payload.id !== reqId) return;
 			const last = session.messages.at(-1);
 			if (last?.role === 'assistant') last.text += e.payload.text;
 			ui.phase = 'streaming';
+			ui.statusDetail = '';
 		}),
 		await listen<{ id: number }>('ai-done', (e) => {
 			if (e.payload.id !== reqId) return;
 			session.streaming = false;
 			ui.phase = 'idle';
+			ui.statusDetail = '';
 			const last = session.messages.at(-1);
 			if (last?.role === 'assistant') showMarksFrom(last.text);
 			saveHistory();
@@ -333,7 +435,7 @@ export async function loadModels(): Promise<void> {
 				apiKey: settings.apiKeys[p],
 				model: '',
 				baseUrl: settings.localBaseUrl,
-				proxy: settings.proxyEnabled && settings.proxyUrl.trim() ? settings.proxyUrl.trim() : null,
+				proxy: proxyOn() ? settings.proxyUrl.trim() : null,
 				systemPrompt: ''
 			}
 		});
@@ -360,9 +462,9 @@ export async function applyHotkeys() {
 	const failed = await registerHotkeys(
 		{ ...settings.hotkeys },
 		{
-			full: captureFull,
-			snip: startSnip,
-			toggle: toggleMode,
+			full: () => void captureFull(),
+			snip: () => void startSnip(),
+			toggle: () => void toggleMode(),
 			visibility: toggleVisibility,
 			marks: clearMarks,
 			cancel: () => {
@@ -413,7 +515,7 @@ function saveHistory() {
 	const msgs = session.messages.map((m) => ({ role: m.role, text: m.text }));
 	const firstAnswer = msgs.find((m) => m.role === 'assistant' && m.text);
 	if (!firstAnswer) return;
-	const title = firstAnswer.text.replace(/```marks[\s\S]*$/, '').trim().slice(0, 70) || 'Без названия';
+	const title = firstAnswer.text.replace(/\`\`\`marks[\s\S]*$/, '').trim().slice(0, 70) || 'Без названия';
 	const i = history.items.findIndex((h) => h.id === session.id);
 	if (i >= 0) history.items.splice(i, 1);
 	history.items.unshift({ id: session.id, ts: Date.now(), title, messages: msgs });
@@ -428,6 +530,7 @@ export function openHistoryItem(id: string) {
 	session.messages = JSON.parse(JSON.stringify(item.messages));
 	session.id = item.id;
 	session.error = '';
+	session.fromHistory = true;
 	ui.historyOpen = false;
 }
 
@@ -442,7 +545,9 @@ export function clearHistory() {
 export async function exportHistoryItem(id: string) {
 	const item = history.items.find((h) => h.id === id);
 	if (!item) return;
-	const md = item.messages.map((m) => `**${m.role === 'user' ? 'Вы' : 'Модель'}:**\n\n${m.text.replace(/```marks[\s\S]*?```/g, '').trim()}`).join('\n\n---\n\n');
+	const md = item.messages
+		.map((m) => `**${m.role === 'user' ? 'Вы' : 'Модель'}:**\n\n${m.text.replace(/\`\`\`marks[\s\S]*?\`\`\`/g, '').trim()}`)
+		.join('\n\n---\n\n');
 	try {
 		await navigator.clipboard.writeText(md);
 		toast('Диалог скопирован в буфер как markdown', 'ok');

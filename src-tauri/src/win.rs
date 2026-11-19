@@ -1,4 +1,4 @@
-//! Win32: защита окна от захвата экрана (SetWindowDisplayAffinity).
+//! Win32: защита окна от захвата экрана и чтение позиции курсора для динамического hit-testing.
 
 #[cfg(windows)]
 pub fn set_exclude_from_capture(window: &tauri::WebviewWindow, enable: bool) -> Result<(), String> {
@@ -8,7 +8,6 @@ pub fn set_exclude_from_capture(window: &tauri::WebviewWindow, enable: bool) -> 
     };
 
     let raw = window.hwnd().map_err(|e| e.to_string())?;
-    // `as _` — на случай, если версия `windows` в tauri отличается от нашей
     let hwnd = HWND(raw.0 as _);
     let affinity = if enable { WDA_EXCLUDEFROMCAPTURE } else { WDA_NONE };
     unsafe {
@@ -20,4 +19,19 @@ pub fn set_exclude_from_capture(window: &tauri::WebviewWindow, enable: bool) -> 
 #[cfg(not(windows))]
 pub fn set_exclude_from_capture(_window: &tauri::WebviewWindow, _enable: bool) -> Result<(), String> {
     Err("Stealth поддерживается только в Windows".into())
+}
+
+#[cfg(windows)]
+pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    use windows::Win32::Foundation::POINT;
+    use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+
+    let mut pt = POINT::default();
+    unsafe { GetCursorPos(&mut pt).ok()? };
+    Some((pt.x, pt.y))
+}
+
+#[cfg(not(windows))]
+pub fn get_cursor_pos() -> Option<(i32, i32)> {
+    None
 }

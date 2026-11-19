@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { invoke } from '@tauri-apps/api/core';
 	import { onMount, untrack } from 'svelte';
 	import * as A from '$lib/actions';
 	import { settings, ui } from '$lib/state.svelte';
@@ -11,18 +12,50 @@
 	import Status from '$lib/components/Status.svelte';
 	import Toasts from '$lib/components/Toasts.svelte';
 
+	function syncHitRects() {
+		if (ui.mode !== 'interactive' || ui.hidden || ui.capturing) return;
+		const dpr = window.devicePixelRatio || 1;
+		const rects = Array.from(document.querySelectorAll<HTMLElement>('[data-hit-area]'))
+			.map((el) => {
+				const r = el.getBoundingClientRect();
+				return {
+					x: Math.round(r.left * dpr),
+					y: Math.round(r.top * dpr),
+					w: Math.round(r.width * dpr),
+					h: Math.round(r.height * dpr)
+				};
+			})
+			.filter((r) => r.w > 0 && r.h > 0);
+		void invoke('set_hit_rects', { rects, forceCapture: ui.dragging }).catch(() => {});
+	}
+
 	onMount(() => {
 		let unlisten: (() => void)[] = [];
 		void (async () => {
 			await A.loadSecrets();
 			unlisten = await A.initEvents();
-			// первый запуск — сразу Interactive с мастером настройки; дальше старт в Ghost Mode
 			await A.setMode(settings.onboarded ? 'ghost' : 'interactive');
+			syncHitRects();
 		})();
-		return () => unlisten.forEach((f) => f());
+
+		const timer = setInterval(syncHitRects, 120);
+		return () => {
+			clearInterval(timer);
+			unlisten.forEach((f) => f());
+		};
 	});
 
-	// Переназначение хоткеев: пока идёт запись комбинации, глобальные бинды сняты
+	$effect(() => {
+		void ui.mode;
+		void ui.settingsOpen;
+		void ui.historyOpen;
+		void ui.dragging;
+		void settings.onboarded;
+		void settings.panelPos;
+		void settings.panelWidth;
+		requestAnimationFrame(syncHitRects);
+	});
+
 	$effect(() => {
 		const keys = $state.snapshot(settings.hotkeys);
 		const recording = ui.recording;
@@ -33,16 +66,14 @@
 		});
 	});
 
-	// Сохранение API-ключей в Credential Manager при изменении
 	$effect(() => {
 		const keys = { ...settings.apiKeys };
 		untrack(() => {
 			if (!ui.secretsOk) return;
-			for (const p of ['gemini', 'openrouter', 'local'] as const) void A.saveSecret(p, keys[p]);
+			for (const p of ['gemini', 'openrouter', 'local'] as const) A.scheduleSaveSecret(p, keys[p]);
 		});
 	});
 
-	// Stealth применяется при старте и при каждом переключении
 	$effect(() => {
 		void settings.stealth;
 		untrack(() => void A.applyStealth());
@@ -53,12 +84,12 @@
 		if (ui.mode === 'snipping') void A.cancelSnip();
 		else if (ui.settingsOpen) ui.settingsOpen = false;
 		else if (ui.historyOpen) ui.historyOpen = false;
+		else if (ui.mode === 'interactive' && !ui.recording && settings.onboarded) void A.setMode('ghost');
 	}
 </script>
 
 <svelte:window {onkeydown} />
 
-<!-- invisible: «Скрыть оверлей» и временное скрытие на время захвата (если Stealth выключен) -->
 <div class="fixed inset-0 overflow-hidden" class:invisible={ui.hidden || ui.capturing}>
 	<Status />
 	{#if ui.mode === 'snipping'}
@@ -68,13 +99,13 @@
 		<Panel />
 		{#if ui.mode === 'interactive' && ui.settingsOpen}
 			<SettingsDrawer />
-			{/if}
-			{#if ui.mode === 'interactive' && ui.historyOpen}
-				<HistoryDrawer />
-			{/if}
-			{#if ui.mode === 'interactive' && !settings.onboarded}
-				<Onboarding />
-			{/if}
+		{/if}
+		{#if ui.mode === 'interactive' && ui.historyOpen}
+			<HistoryDrawer />
+		{/if}
+		{#if ui.mode === 'interactive' && !settings.onboarded}
+			<Onboarding />
+		{/if}
 	{/if}
 </div>
 

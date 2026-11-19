@@ -1,15 +1,22 @@
 <script lang="ts">
 	import { fade } from 'svelte/transition';
-	import { motion, session, ui } from '$lib/state.svelte';
+	import { motion, session, settings, ui } from '$lib/state.svelte';
+	import Kbd from './Kbd.svelte';
 
-	// 0..1000 -> CSS-пиксели окна (с учётом области, которую видела модель)
-	const px = (v: number) => (session.frame.x + (v / 1000) * session.frame.w);
-	const py = (v: number) => (session.frame.y + (v / 1000) * session.frame.h);
+	const px = (v: number) => session.frame.x + (v / 1000) * session.frame.w;
+	const py = (v: number) => session.frame.y + (v / 1000) * session.frame.h;
+	const clampX = (x: number) => Math.max(8, Math.min(x, window.innerWidth - 268));
+	const clampY = (y: number) => Math.max(20, Math.min(y, window.innerHeight - 24));
 </script>
 
-<div class="pointer-events-none fixed bottom-3 left-1/2 z-40 -translate-x-1/2 rounded-full border border-line bg-hud px-3 py-1 text-[11px] text-muted">≈ метки приблизительные: для точности выделите меньшую область</div>
+<div class="pointer-events-none fixed bottom-3 left-1/2 z-40 flex -translate-x-1/2 items-center gap-2 rounded-full border border-line bg-hud px-3 py-1 text-[11px] text-muted">
+	<span>≈ метки приблизительные</span>
+	{#if settings.hotkeys.marks}
+		<span>· убрать:</span>
+		<Kbd accel={settings.hotkeys.marks} />
+	{/if}
+</div>
 
-<!-- pointer-events-none: метки не перехватывают клики, даже в Interactive -->
 <svg class="pointer-events-none fixed inset-0 h-full w-full" aria-hidden="true">
 	<defs>
 		<marker id="head" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
@@ -35,12 +42,10 @@
 			{/if}
 
 			{#if m.label}
-				{@const lx = m.type === 'arrow' && m.x2 !== undefined ? px(m.x2) + 10 : px(m.x) + (m.type === 'text' ? 0 : 14)}
-				{@const ly = m.type === 'arrow' && m.y2 !== undefined ? py(m.y2) - 10 : py(m.y) - (m.type === 'text' ? 0 : 14)}
-				<foreignObject x={lx} y={ly - 14} width="260" height="30" style="overflow:visible">
-					<div
-						class="inline-block max-w-[260px] truncate rounded-md border border-accent bg-hud-solid px-2 py-0.5 text-xs text-fg"
-					>
+				{@const rawX = m.type === 'arrow' && m.x2 !== undefined ? px(m.x2) + 10 : px(m.x) + (m.type === 'text' ? 0 : 14)}
+				{@const rawY = m.type === 'arrow' && m.y2 !== undefined ? py(m.y2) - 10 : py(m.y) - (m.type === 'text' ? 0 : 14)}
+				<foreignObject x={clampX(rawX)} y={clampY(rawY) - 14} width="260" height="30" style="overflow:visible">
+					<div class="inline-block max-w-[260px] truncate rounded-md border border-accent bg-hud-solid px-2 py-0.5 text-xs text-fg">
 						{m.label}
 					</div>
 				</foreignObject>
