@@ -1,4 +1,5 @@
 .svelte-kit/
+src-tauri/bin/
 # Зависимости Node
 node_modules/
 
