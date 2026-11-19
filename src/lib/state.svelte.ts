@@ -1,4 +1,4 @@
-import type { Mark } from './marks';
+﻿import type { Mark } from './marks';
 
 export type Provider = 'gemini' | 'openrouter' | 'local';
 export type Mode = 'ghost' | 'interactive' | 'snipping';
@@ -46,7 +46,7 @@ export const PRESETS: Record<Provider, string[]> = {
 export const DEFAULT_HOTKEYS: Hotkeys = {
 	full: 'Alt+Q',
 	snip: 'Alt+W',
-	toggle: 'Alt+E',
+	toggle: 'Alt+G',
 	visibility: 'Alt+H',
 	marks: 'Alt+M',
 	cancel: 'Alt+X',
@@ -54,35 +54,35 @@ export const DEFAULT_HOTKEYS: Hotkeys = {
 };
 
 export const HOTKEY_LABELS: Record<HotkeyName, string> = {
-	full: 'Скрин (область / экран)',
-	snip: 'Выделить область',
-	toggle: 'Ghost ⇄ Interactive',
-	visibility: 'Скрыть / показать HUD',
-	marks: 'Очистить метки',
-	cancel: 'Стоп генерации',
-	preset: 'Следующий пресет'
+	full: 'РЎРєСЂРёРЅ (РѕР±Р»Р°СЃС‚СЊ / СЌРєСЂР°РЅ)',
+	snip: 'Р’С‹РґРµР»РёС‚СЊ РѕР±Р»Р°СЃС‚СЊ',
+	toggle: 'Ghost в‡„ Interactive',
+	visibility: 'РЎРєСЂС‹С‚СЊ / РїРѕРєР°Р·Р°С‚СЊ HUD',
+	marks: 'РћС‡РёСЃС‚РёС‚СЊ РјРµС‚РєРё',
+	cancel: 'РЎС‚РѕРї РіРµРЅРµСЂР°С†РёРё',
+	preset: 'РЎР»РµРґСѓСЋС‰РёР№ РїСЂРµСЃРµС‚'
 };
 
 export const DEFAULT_PRESETS: Preset[] = [
 	{
 		id: 'solve',
-		name: 'Решить',
-		prompt: 'Реши задачу со скриншота пошагово (используй формулы LaTeX $...$) и чётко выдели итоговый ответ.'
+		name: 'Р РµС€РёС‚СЊ',
+		prompt: 'Р РµС€Рё Р·Р°РґР°С‡Сѓ СЃРѕ СЃРєСЂРёРЅС€РѕС‚Р° РїРѕС€Р°РіРѕРІРѕ (РёСЃРїРѕР»СЊР·СѓР№ С„РѕСЂРјСѓР»С‹ LaTeX $...$) Рё С‡С‘С‚РєРѕ РІС‹РґРµР»Рё РёС‚РѕРіРѕРІС‹Р№ РѕС‚РІРµС‚.'
 	},
 	{
 		id: 'brief',
-		name: 'Кратко',
-		prompt: 'Проанализируй скриншот и дай максимально краткий, точный ответ на русском языке без воды.'
+		name: 'РљСЂР°С‚РєРѕ',
+		prompt: 'РџСЂРѕР°РЅР°Р»РёР·РёСЂСѓР№ СЃРєСЂРёРЅС€РѕС‚ Рё РґР°Р№ РјР°РєСЃРёРјР°Р»СЊРЅРѕ РєСЂР°С‚РєРёР№, С‚РѕС‡РЅС‹Р№ РѕС‚РІРµС‚ РЅР° СЂСѓСЃСЃРєРѕРј СЏР·С‹РєРµ Р±РµР· РІРѕРґС‹.'
 	},
 	{
 		id: 'code',
-		name: 'Код',
-		prompt: 'Разбери код на скриншоте, найди ошибки или напиши исправленный вариант.'
+		name: 'РљРѕРґ',
+		prompt: 'Р Р°Р·Р±РµСЂРё РєРѕРґ РЅР° СЃРєСЂРёРЅС€РѕС‚Рµ, РЅР°Р№РґРё РѕС€РёР±РєРё РёР»Рё РЅР°РїРёС€Рё РёСЃРїСЂР°РІР»РµРЅРЅС‹Р№ РІР°СЂРёР°РЅС‚.'
 	},
 	{
 		id: 'translate',
-		name: 'Перевод',
-		prompt: 'Переведи весь текст со скриншота на естественный русский язык.'
+		name: 'РџРµСЂРµРІРѕРґ',
+		prompt: 'РџРµСЂРµРІРµРґРё РІРµСЃСЊ С‚РµРєСЃС‚ СЃРѕ СЃРєСЂРёРЅС€РѕС‚Р° РЅР° РµСЃС‚РµСЃС‚РІРµРЅРЅС‹Р№ СЂСѓСЃСЃРєРёР№ СЏР·С‹Рє.'
 	}
 ];
 
@@ -114,7 +114,7 @@ const initialSettings = loadJson('stealth_hud_settings', {
 	marksGrid: true,
 	presets: structuredClone(DEFAULT_PRESETS) as Preset[],
 	activePreset: DEFAULT_PRESETS[0].id,
-	systemPrompt: 'Ты лаконичный и точный ИИ-ассистент. Отвечай на русском языке чётко и по делу.',
+	systemPrompt: 'РўС‹ Р»Р°РєРѕРЅРёС‡РЅС‹Р№ Рё С‚РѕС‡РЅС‹Р№ РР-Р°СЃСЃРёСЃС‚РµРЅС‚. РћС‚РІРµС‡Р°Р№ РЅР° СЂСѓСЃСЃРєРѕРј СЏР·С‹РєРµ С‡С‘С‚РєРѕ Рё РїРѕ РґРµР»Сѓ.',
 	opacity: 92,
 	fontSize: 13,
 	panelWidth: 420,
@@ -194,3 +194,4 @@ if (typeof window !== 'undefined') {
 		});
 	});
 }
+
