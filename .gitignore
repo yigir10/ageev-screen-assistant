@@ -1,3 +1,4 @@
+.svelte-kit/
 # Зависимости Node
 node_modules/
 

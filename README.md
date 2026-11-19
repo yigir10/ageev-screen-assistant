@@ -43,3 +43,4 @@ Tauri v2 + Svelte 5 (Runes) + SvelteKit static + Tailwind v4 + Rust. Тольк�
 - Установщик: `npm run tauri build` (файл в `src-tauri/target/release/bundle/nsis`) или GitHub Actions: `.github/workflows/build.yml`.
 - Если `cargo` ругается на API крейтов `xcap` / `windows` (у них часто меняются сигнатуры),
   поправьте версии в `src-tauri/Cargo.toml` под актуальные.
+"# Ageev-Screen-Assistant" 
