@@ -17,7 +17,7 @@ const SNAP_BG_WIDTH: u32 = 1920; // «замороженный» фон для �
 const GRID_COLOR: [u8; 3] = [255, 214, 10];
 
 /// Прямоугольник в ФИЗИЧЕСКИХ пикселях основного монитора (фронтенд уже умножил на devicePixelRatio).
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 pub struct Region {
     pub x: u32,
     pub y: u32,
@@ -29,7 +29,7 @@ pub struct Region {
 #[derive(Default)]
 pub struct Snapshot(Mutex<Option<RgbaImage>>);
 
-fn grab_primary() -> Result<RgbaImage, String> {
+pub fn grab_primary() -> Result<RgbaImage, String> {
     let monitors = Monitor::all().map_err(|e| format!("Монитор: {e}"))?;
     let monitor = monitors
         .into_iter()

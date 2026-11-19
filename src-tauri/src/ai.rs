@@ -379,3 +379,91 @@ pub async fn test_key(cfg: AiConfig) -> Result<u64, String> {
     }
     Ok(t.elapsed().as_millis() as u64)
 }
+
+
+/// Быстрый однократный vision-запрос без стриминга (используется для извлечения FEN шахматной доски).
+#[tauri::command]
+pub async fn quick_vision(cfg: AiConfig, prompt: String, image: String) -> Result<String, String> {
+    if cfg.provider != "local" && cfg.api_key.trim().is_empty() {
+        return Err("Не задан API-ключ (Настройки → Провайдер)".into());
+    }
+    let client = build_client(&cfg, Some(Duration::from_secs(25)))?;
+
+    match cfg.provider.as_str() {
+        "gemini" => {
+            let model = cfg.model.trim().trim_start_matches("models/");
+            let body = json!({
+                "contents": [{
+                    "parts": [
+                        { "inline_data": { "mime_type": "image/jpeg", "data": image } },
+                        { "text": prompt }
+                    ]
+                }]
+            });
+            let resp = client
+                .post(format!("{GEMINI_BASE}/models/{model}:generateContent"))
+                .header("x-goog-api-key", cfg.api_key.trim())
+                .json(&body)
+                .send()
+                .await
+                .map_err(|e| format!("Сеть: {e}"))?;
+            if !resp.status().is_success() {
+                let st = resp.status();
+                let txt = resp.text().await.unwrap_or_default();
+                return Err(format!("HTTP {st}: {}", short(&txt)));
+            }
+            let v: Value = resp.json().await.map_err(|e| e.to_string())?;
+            let mut out = String::new();
+            if let Some(parts) = v["candidates"][0]["content"]["parts"].as_array() {
+                for p in parts {
+                    if p["thought"].as_bool() == Some(true) {
+                        continue;
+                    }
+                    if let Some(t) = p["text"].as_str() {
+                        out.push_str(t);
+                    }
+                }
+            }
+            let trimmed = out.trim().to_string();
+            if trimmed.is_empty() {
+                Err("Пустой ответ от Gemini".into())
+            } else {
+                Ok(trimmed)
+            }
+        }
+        "openrouter" | "local" => {
+            let url = if cfg.provider == "openrouter" {
+                format!("{OPENROUTER_BASE}/chat/completions")
+            } else {
+                format!("{}/chat/completions", local_base(&cfg))
+            };
+            let body = json!({
+                "model": cfg.model,
+                "messages": [{
+                    "role": "user",
+                    "content": [
+                        { "type": "text", "text": prompt },
+                        { "type": "image_url", "image_url": { "url": format!("data:image/jpeg;base64,{image}") } }
+                    ]
+                }]
+            });
+            let mut req = client.post(url).json(&body);
+            if !cfg.api_key.trim().is_empty() {
+                req = req.bearer_auth(cfg.api_key.trim());
+            }
+            let resp = req.send().await.map_err(|e| format!("Сеть: {e}"))?;
+            if !resp.status().is_success() {
+                let st = resp.status();
+                let txt = resp.text().await.unwrap_or_default();
+                return Err(format!("HTTP {st}: {}", short(&txt)));
+            }
+            let v: Value = resp.json().await.map_err(|e| e.to_string())?;
+            v["choices"][0]["message"]["content"]
+                .as_str()
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .ok_or_else(|| "Пустой ответ от модели".into())
+        }
+        other => Err(format!("Неизвестный провайдер: {other}")),
+    }
+}

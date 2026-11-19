@@ -23,7 +23,7 @@
 		['openrouter', 'OpenRouter'],
 		['local', 'Local']
 	];
-	const hotkeyNames: HotkeyName[] = ['full', 'snip', 'toggle', 'visibility', 'marks', 'cancel', 'preset'];
+	const hotkeyNames: HotkeyName[] = ['full', 'snip', 'toggle', 'visibility', 'marks', 'cancel', 'preset', 'chessBoard', 'chessMove'];
 
 	let showKey = $state(false);
 	let busyKey = $state(false);

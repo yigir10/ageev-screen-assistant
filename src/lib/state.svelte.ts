@@ -1,9 +1,18 @@
-﻿import type { Mark } from './marks';
+import type { Mark } from './marks';
 
 export type Provider = 'gemini' | 'openrouter' | 'local';
 export type Mode = 'ghost' | 'interactive' | 'snipping';
 export type Phase = 'idle' | 'capturing' | 'thinking' | 'streaming';
-export type HotkeyName = 'full' | 'snip' | 'toggle' | 'visibility' | 'marks' | 'cancel' | 'preset';
+export type HotkeyName =
+	| 'full'
+	| 'snip'
+	| 'toggle'
+	| 'visibility'
+	| 'marks'
+	| 'cancel'
+	| 'preset'
+	| 'chessBoard'
+	| 'chessMove';
 export type Hotkeys = Record<HotkeyName, string>;
 
 export interface Preset {
@@ -17,6 +26,13 @@ export interface PinnedRegion {
 	y: number;
 	w: number;
 	h: number;
+}
+
+export interface ChessArrows {
+	best: string;
+	second: string | null;
+	evalText: string;
+	fen: string;
 }
 
 export interface ChatMessage {
@@ -43,6 +59,18 @@ export const PRESETS: Record<Provider, string[]> = {
 	local: ['local-model']
 };
 
+export const ALL_HOTKEYS: HotkeyName[] = [
+	'full',
+	'snip',
+	'toggle',
+	'visibility',
+	'marks',
+	'cancel',
+	'preset',
+	'chessBoard',
+	'chessMove'
+];
+
 export const DEFAULT_HOTKEYS: Hotkeys = {
 	full: 'Alt+Q',
 	snip: 'Alt+W',
@@ -50,39 +78,43 @@ export const DEFAULT_HOTKEYS: Hotkeys = {
 	visibility: 'Alt+H',
 	marks: 'Alt+M',
 	cancel: 'Alt+X',
-	preset: 'Alt+P'
+	preset: 'Alt+P',
+	chessBoard: 'Alt+B',
+	chessMove: 'Alt+C'
 };
 
 export const HOTKEY_LABELS: Record<HotkeyName, string> = {
-	full: 'РЎРєСЂРёРЅ (РѕР±Р»Р°СЃС‚СЊ / СЌРєСЂР°РЅ)',
-	snip: 'Р’С‹РґРµР»РёС‚СЊ РѕР±Р»Р°СЃС‚СЊ',
-	toggle: 'Ghost в‡„ Interactive',
-	visibility: 'РЎРєСЂС‹С‚СЊ / РїРѕРєР°Р·Р°С‚СЊ HUD',
-	marks: 'РћС‡РёСЃС‚РёС‚СЊ РјРµС‚РєРё',
-	cancel: 'РЎС‚РѕРї РіРµРЅРµСЂР°С†РёРё',
-	preset: 'РЎР»РµРґСѓСЋС‰РёР№ РїСЂРµСЃРµС‚'
+	full: 'Скрин (область / экран)',
+	snip: 'Выделить область',
+	toggle: 'Ghost ⇄ Interactive',
+	visibility: 'Скрыть / показать HUD',
+	marks: 'Очистить метки и стрелки',
+	cancel: 'Стоп генерации',
+	preset: 'Следующий пресет',
+	chessBoard: 'Шахматы: калибровать доску',
+	chessMove: 'Шахматы: ход Stockfish 19'
 };
 
 export const DEFAULT_PRESETS: Preset[] = [
 	{
 		id: 'solve',
-		name: 'Р РµС€РёС‚СЊ',
-		prompt: 'Р РµС€Рё Р·Р°РґР°С‡Сѓ СЃРѕ СЃРєСЂРёРЅС€РѕС‚Р° РїРѕС€Р°РіРѕРІРѕ (РёСЃРїРѕР»СЊР·СѓР№ С„РѕСЂРјСѓР»С‹ LaTeX $...$) Рё С‡С‘С‚РєРѕ РІС‹РґРµР»Рё РёС‚РѕРіРѕРІС‹Р№ РѕС‚РІРµС‚.'
+		name: 'Решить',
+		prompt: 'Реши задачу со скриншота пошагово (используй формулы LaTeX $...$) и чётко выдели итоговый ответ.'
 	},
 	{
 		id: 'brief',
-		name: 'РљСЂР°С‚РєРѕ',
-		prompt: 'РџСЂРѕР°РЅР°Р»РёР·РёСЂСѓР№ СЃРєСЂРёРЅС€РѕС‚ Рё РґР°Р№ РјР°РєСЃРёРјР°Р»СЊРЅРѕ РєСЂР°С‚РєРёР№, С‚РѕС‡РЅС‹Р№ РѕС‚РІРµС‚ РЅР° СЂСѓСЃСЃРєРѕРј СЏР·С‹РєРµ Р±РµР· РІРѕРґС‹.'
+		name: 'Кратко',
+		prompt: 'Проанализируй скриншот и дай максимально краткий, точный ответ на русском языке без воды.'
 	},
 	{
 		id: 'code',
-		name: 'РљРѕРґ',
-		prompt: 'Р Р°Р·Р±РµСЂРё РєРѕРґ РЅР° СЃРєСЂРёРЅС€РѕС‚Рµ, РЅР°Р№РґРё РѕС€РёР±РєРё РёР»Рё РЅР°РїРёС€Рё РёСЃРїСЂР°РІР»РµРЅРЅС‹Р№ РІР°СЂРёР°РЅС‚.'
+		name: 'Код',
+		prompt: 'Разбери код на скриншоте, найди ошибки или напиши исправленный вариант.'
 	},
 	{
 		id: 'translate',
-		name: 'РџРµСЂРµРІРѕРґ',
-		prompt: 'РџРµСЂРµРІРµРґРё РІРµСЃСЊ С‚РµРєСЃС‚ СЃРѕ СЃРєСЂРёРЅС€РѕС‚Р° РЅР° РµСЃС‚РµСЃС‚РІРµРЅРЅС‹Р№ СЂСѓСЃСЃРєРёР№ СЏР·С‹Рє.'
+		name: 'Перевод',
+		prompt: 'Переведи весь текст со скриншота на естественный русский язык.'
 	}
 ];
 
@@ -114,12 +146,18 @@ const initialSettings = loadJson('stealth_hud_settings', {
 	marksGrid: true,
 	presets: structuredClone(DEFAULT_PRESETS) as Preset[],
 	activePreset: DEFAULT_PRESETS[0].id,
-	systemPrompt: 'РўС‹ Р»Р°РєРѕРЅРёС‡РЅС‹Р№ Рё С‚РѕС‡РЅС‹Р№ РР-Р°СЃСЃРёСЃС‚РµРЅС‚. РћС‚РІРµС‡Р°Р№ РЅР° СЂСѓСЃСЃРєРѕРј СЏР·С‹РєРµ С‡С‘С‚РєРѕ Рё РїРѕ РґРµР»Сѓ.',
+	systemPrompt: 'Ты лаконичный и точный ИИ-ассистент. Отвечай на русском языке чётко и по делу.',
 	opacity: 92,
 	fontSize: 13,
 	panelWidth: 420,
 	panelPos: null as { x: number; y: number } | null,
 	pinnedRegion: null as PinnedRegion | null,
+	chessBoard: null as PinnedRegion | null,
+	chessBottom: 'white' as 'white' | 'black',
+	chessTurn: 'w' as 'w' | 'b',
+	stockfishPath: 'src-tauri/bin/stockfish.exe',
+	stockfishMovetime: 250,
+	chessAuto: false,
 	onboarded: false
 });
 
@@ -138,10 +176,13 @@ export const ui = $state({
 	statusDetail: '',
 	settingsOpen: false,
 	historyOpen: false,
+	chessOpen: false,
 	recording: false,
 	dragging: false,
 	snipBg: '',
+	snipPurpose: 'region' as 'region' | 'board',
 	marks: [] as Mark[],
+	chessArrows: null as ChessArrows | null,
 	toasts: [] as { id: string; text: string; kind: 'info' | 'error' | 'ok' }[],
 	models: { gemini: [], openrouter: [], local: [] } as Record<Provider, string[]>,
 	secretsOk: false
@@ -194,4 +235,3 @@ if (typeof window !== 'undefined') {
 		});
 	});
 }
-

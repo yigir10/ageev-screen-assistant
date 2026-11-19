@@ -18,6 +18,7 @@
 			: null
 	);
 	const dpr = $derived(window.devicePixelRatio || 1);
+	const isBoard = $derived(ui.snipPurpose === 'board');
 
 	function onpointerdown(e: PointerEvent) {
 		if (e.button === 2) {
@@ -60,14 +61,14 @@
 	{#if rect}
 		{@const badgeTop = rect.y + rect.h + 32 > window.innerHeight ? Math.max(8, rect.y - 26) : rect.y + rect.h + 8}
 		<div
-			class="absolute box-border border border-accent"
+			class="absolute box-border border {isBoard ? 'border-warn' : 'border-accent'}"
 			style="left:{rect.x}px; top:{rect.y}px; width:{rect.w}px; height:{rect.h}px; box-shadow:0 0 0 9999px rgba(0,0,0,0.35)"
 		></div>
 		{#each [[rect.x, rect.y], [rect.x + rect.w, rect.y], [rect.x, rect.y + rect.h], [rect.x + rect.w, rect.y + rect.h]] as c, i (i)}
-			<div class="absolute h-2 w-2 bg-accent" style="left:{c[0] - 4}px; top:{c[1] - 4}px"></div>
+			<div class="absolute h-2 w-2 {isBoard ? 'bg-warn' : 'bg-accent'}" style="left:{c[0] - 4}px; top:{c[1] - 4}px"></div>
 		{/each}
 		<div
-			class="absolute rounded-md bg-hud-solid px-2 py-0.5 font-mono text-xs text-accent"
+			class="absolute rounded-md bg-hud-solid px-2 py-0.5 font-mono text-xs {isBoard ? 'text-warn' : 'text-accent'}"
 			style="left:{rect.x}px; top:{badgeTop}px"
 		>
 			{Math.round(rect.w * dpr)}×{Math.round(rect.h * dpr)}
@@ -79,6 +80,7 @@
 	{/if}
 
 	<div class="absolute top-5 left-1/2 -translate-x-1/2 rounded-[10px] border border-line bg-hud px-3.5 py-2 text-xs">
-		Выделите область (закрепится за «Скрин») · <kbd class="font-mono text-accent">Esc</kbd> или <kbd class="font-mono text-accent">ПКМ</kbd> — отмена
+		{isBoard ? 'Обведите квадрат шахматной доски (ровно по краям 8×8)' : 'Выделите область (закрепится за «Скрин»)'} ·
+		<kbd class="font-mono text-accent">Esc</kbd> или <kbd class="font-mono text-accent">ПКМ</kbd> — отмена
 	</div>
 </div>

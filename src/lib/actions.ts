@@ -34,6 +34,7 @@ export async function setMode(mode: Mode) {
 	if (mode !== 'interactive') {
 		ui.settingsOpen = false;
 		ui.historyOpen = false;
+		ui.chessOpen = false;
 		ui.dragging = false;
 	}
 	try {
@@ -53,13 +54,28 @@ export function toggleVisibility() {
 export function openSettings(open?: boolean) {
 	const next = open ?? !ui.settingsOpen;
 	ui.settingsOpen = next;
-	if (next) ui.historyOpen = false;
+	if (next) {
+		ui.historyOpen = false;
+		ui.chessOpen = false;
+	}
 }
 
 export function openHistory(open?: boolean) {
 	const next = open ?? !ui.historyOpen;
 	ui.historyOpen = next;
-	if (next) ui.settingsOpen = false;
+	if (next) {
+		ui.settingsOpen = false;
+		ui.chessOpen = false;
+	}
+}
+
+export function openChess(open?: boolean) {
+	const next = open ?? !ui.chessOpen;
+	ui.chessOpen = next;
+	if (next) {
+		ui.settingsOpen = false;
+		ui.historyOpen = false;
+	}
 }
 
 export async function applyStealth() {
@@ -70,7 +86,7 @@ export async function applyStealth() {
 	}
 }
 
-// ───────────── захват экрана и закреплённая область ─────────────
+// ───────────── захват экрана, закреплённая область и калибровка доски ─────────────
 
 async function hideUiForCapture() {
 	if (settings.stealth) return;
@@ -115,7 +131,6 @@ function clampRect(r: Rect): Rect | null {
 	return w >= 10 && h >= 10 ? { x, y, w, h } : null;
 }
 
-/** Быстрый «Скрин»: если область закреплена — снимает её мгновенно, иначе — весь экран. */
 export async function captureFull() {
 	const pinned = settings.pinnedRegion ? clampRect(settings.pinnedRegion) : null;
 	if (pinned) {
@@ -140,9 +155,11 @@ export function clearPinnedRegion() {
 	toast('Сброшено: быстрый скрин снимает весь экран', 'info');
 }
 
-export async function startSnip() {
+async function beginSnipOverlay(purpose: 'region' | 'board') {
 	await cancel();
 	ui.hidden = false;
+	ui.snipPurpose = purpose;
+	if (purpose === 'board') ui.chessArrows = null;
 	await hideUiForCapture();
 	try {
 		ui.snipBg = await invoke<string>('snapshot_begin');
@@ -154,6 +171,9 @@ export async function startSnip() {
 	}
 	await setMode('snipping');
 }
+
+export const startSnip = () => beginSnipOverlay('region');
+export const startBoardCalibration = () => beginSnipOverlay('board');
 
 export async function cancelSnip() {
 	ui.snipBg = '';
@@ -168,8 +188,17 @@ export interface Rect {
 	h: number;
 }
 
-/** Выделение области: запоминает зону для быстрого скрина и сразу отправляет её в ИИ. */
 export async function captureRegion(rect: Rect) {
+	if (ui.snipPurpose === 'board') {
+		ui.snipBg = '';
+		await invoke('snapshot_drop').catch(() => {});
+		settings.chessBoard = { ...rect };
+		await setMode('interactive');
+		openChess(true);
+		toast(`Доска откалибрована (${Math.round(rect.w)}×${Math.round(rect.h)}px)`, 'ok');
+		return;
+	}
+
 	const dpr = window.devicePixelRatio || 1;
 	const cached = !!ui.snipBg;
 	ui.snipBg = '';
@@ -192,6 +221,127 @@ export async function captureRegion(rect: Rect) {
 	);
 }
 
+// ───────────── шахматный модуль (Stockfish 19 + VLM) ─────────────
+
+let chessBusy = false;
+let lastChessDoneAt = 0;
+
+export function clearChessArrows() {
+	ui.chessArrows = null;
+}
+
+export async function stopChessWatcher() {
+	await invoke('stop_chess_watcher').catch(() => {});
+}
+
+export async function syncChessWatcher() {
+	const board = settings.chessBoard ? clampRect(settings.chessBoard) : null;
+	if (!settings.chessAuto || !board || ui.mode === 'snipping') {
+		await stopChessWatcher();
+		return;
+	}
+	const dpr = window.devicePixelRatio || 1;
+	await invoke('start_chess_watcher', {
+		region: {
+			x: Math.round(board.x * dpr),
+			y: Math.round(board.y * dpr),
+			w: Math.round(board.w * dpr),
+			h: Math.round(board.h * dpr)
+		},
+		intervalMs: 450
+	}).catch((e) => toast(String(e), 'error'));
+}
+
+export async function analyzeChess(withExplanation = false, isAuto = false) {
+	if (chessBusy) return;
+	if (isAuto && Date.now() - lastChessDoneAt < 1500) return;
+	const board = settings.chessBoard ? clampRect(settings.chessBoard) : null;
+	if (!board) {
+		toast(`Сначала откалибруйте доску (${settings.hotkeys.chessBoard || 'кнопка в ♟'})`, 'error');
+		return;
+	}
+
+	chessBusy = true;
+	if (!isAuto) await cancel();
+	ui.hidden = false;
+	if (!settings.stealth) ui.chessArrows = null;
+	await tick();
+	await hideUiForCapture();
+	await sleep(30);
+
+	ui.phase = 'capturing';
+	ui.statusDetail = 'Снимаю доску…';
+	try {
+		const dpr = window.devicePixelRatio || 1;
+		const b64 = await invoke<string>('capture_region', {
+			region: {
+				x: Math.round(board.x * dpr),
+				y: Math.round(board.y * dpr),
+				w: Math.round(board.w * dpr),
+				h: Math.round(board.h * dpr)
+			},
+			grid: false,
+			useCached: false
+		});
+		ui.capturing = false;
+
+		ui.phase = 'thinking';
+		ui.statusDetail = 'Распознаю позицию (FEN)…';
+		const p = settings.provider;
+		const fenPrompt = `You are a chess board OCR. Inspect this cropped 8x8 chess board (${settings.chessBottom === 'white' ? 'White pieces are at the bottom, rank 1 at bottom, file a on left' : 'Black pieces are at the bottom, rank 8 at bottom, file h on left'}). Output ONLY the exact FEN string for this position with '${settings.chessTurn}' to move (format: <8 ranks separated by /> ${settings.chessTurn} KQkq - 0 1). No markdown, no backticks, no extra words.`;
+
+		const rawFen = await invoke<string>('quick_vision', {
+			cfg: {
+				provider: p,
+				apiKey: settings.apiKeys[p],
+				model: settings.models[p],
+				baseUrl: settings.localBaseUrl,
+				proxy: proxyOn() ? settings.proxyUrl.trim() : null,
+				systemPrompt: ''
+			},
+			prompt: fenPrompt,
+			image: b64
+		});
+
+		ui.statusDetail = 'Stockfish 19 считает…';
+		const res = await invoke<{
+			bestMove: string;
+			secondMove: string | null;
+			evalText: string;
+			normalizedFen: string;
+		}>('analyze_chess_uci', {
+			stockfishPath: settings.stockfishPath,
+			fen: rawFen,
+			turn: settings.chessTurn,
+			movetimeMs: Number(settings.stockfishMovetime) || 250
+		});
+
+		ui.chessArrows = {
+			best: res.bestMove,
+			second: res.secondMove,
+			evalText: res.evalText,
+			fen: res.normalizedFen
+		};
+		ui.phase = 'idle';
+		ui.statusDetail = '';
+		if (!isAuto) toast(`SF19: ${res.bestMove} (${res.evalText})`, 'ok');
+
+		if (withExplanation) {
+			session.frame = board;
+			const explainPrompt = `Позиция FEN: ${res.normalizedFen}. Движок Stockfish 19 рекомендует ход ${res.bestMove} (оценка ${res.evalText}${res.secondMove ? `, альтернатива ${res.secondMove}` : ''}). Кратко на русском языке объясни главную тактическую или стратегическую идею этого хода.`;
+			beginChat(b64, explainPrompt);
+		}
+	} catch (e) {
+		ui.capturing = false;
+		ui.phase = 'idle';
+		ui.statusDetail = '';
+		toast(friendlyError(String(e), settings.provider, proxyOn()), 'error');
+	} finally {
+		chessBusy = false;
+		lastChessDoneAt = Date.now();
+	}
+}
+
 // ───────────── чат и пресеты ─────────────
 
 const proxyOn = () => settings.proxyEnabled && settings.proxyUrl.trim() !== '';
@@ -201,12 +351,10 @@ export function activePrompt(): string {
 	return p?.prompt.trim() || 'Проанализируй скриншот и ответь на то, что на нём спрашивается или требуется сделать.';
 }
 
-/** Одиночный клик только переключает активный пресет (без лишней траты API). */
 export function selectPreset(id: string) {
 	settings.activePreset = id;
 }
 
-/** Повторный прогон по текущему скриншоту выбранным пресетом (двойной клик). */
 export function runPresetNow(id: string) {
 	settings.activePreset = id;
 	if (session.messages.length && !session.streaming) ask(activePrompt());
@@ -245,7 +393,6 @@ function beginChat(image: string, customText?: string) {
 	void send();
 }
 
-/** Текстовый вопрос работает как с историей, так и с нуля (или с картинкой из буфера Ctrl+V). */
 export function ask(text: string, pastedImage?: string | null) {
 	const t = text.trim();
 	if (session.streaming) return;
@@ -331,6 +478,7 @@ let marksTimer: ReturnType<typeof setTimeout> | undefined;
 export function clearMarks() {
 	clearTimeout(marksTimer);
 	ui.marks = [];
+	ui.chessArrows = null;
 }
 
 function showMarksFrom(text: string) {
@@ -339,7 +487,7 @@ function showMarksFrom(text: string) {
 	if (!marks.length) return;
 	ui.marks = marks;
 	clearTimeout(marksTimer);
-	if (settings.marksTtl > 0) marksTimer = setTimeout(clearMarks, settings.marksTtl * 1000);
+	if (settings.marksTtl > 0) marksTimer = setTimeout(() => (ui.marks = []), settings.marksTtl * 1000);
 }
 
 export function clearChat() {
@@ -351,7 +499,7 @@ export function clearChat() {
 	session.fromHistory = false;
 }
 
-// ───────────── ключи в Windows Credential Manager (с дебаунсом и диффом) ─────────────
+// ───────────── ключи в Windows Credential Manager ─────────────
 
 const PROVIDERS = ['gemini', 'openrouter', 'local'] as const;
 const lastSavedKeys: Record<(typeof PROVIDERS)[number], string> = { gemini: '', openrouter: '', local: '' };
@@ -389,6 +537,9 @@ export const quitApp = () => invoke('quit_app');
 
 export async function initEvents(): Promise<UnlistenFn[]> {
 	return [
+		await listen('chess-board-changed', () => {
+			if (settings.chessAuto && ui.mode !== 'snipping') void analyzeChess(false, true);
+		}),
 		await listen<string>('tray', (e) => {
 			if (e.payload === 'toggle') void toggleMode();
 			else if (e.payload === 'visibility') toggleVisibility();
@@ -471,7 +622,9 @@ export async function applyHotkeys() {
 				void cancel();
 				clearMarks();
 			},
-			preset: cyclePreset
+			preset: cyclePreset,
+			chessBoard: () => void startBoardCalibration(),
+			chessMove: () => void analyzeChess(false)
 		}
 	);
 	if (failed.length) {

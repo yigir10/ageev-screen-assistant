@@ -1,5 +1,6 @@
 mod ai;
 mod capture;
+mod chess;
 mod secrets;
 mod win;
 
@@ -51,10 +52,6 @@ fn fit_primary_monitor(app: &AppHandle, w: &tauri::WebviewWindow) {
     }
 }
 
-/// Управление режимами окна:
-/// - "ghost": клики всегда проходят сквозь окно
-/// - "snipping": окно ловит клики на весь экран для выделения области
-/// - "interactive": динамический hit-testing (клики ловятся только над панелями, вокруг работает весь экран)
 #[tauri::command]
 fn set_window_mode(app: AppHandle, state: State<'_, HitState>, mode: String) -> Result<(), String> {
     let w = main_window(&app)?;
@@ -151,6 +148,7 @@ pub fn run() {
         .manage(ai::StreamState::default())
         .manage(capture::Snapshot::default())
         .manage(HitState::default())
+        .manage(chess::ChessWatcher::default())
         .setup(|app| {
             let w = app.get_webview_window("main").expect("main window");
             fit_primary_monitor(app.handle(), &w);
@@ -158,7 +156,6 @@ pub fn run() {
             w.show()?;
             build_tray(app.handle())?;
 
-            // Фоновый цикл динамического hit-testing (25 мс) для Interactive Mode
             let app_hit = app.handle().clone();
             tauri::async_runtime::spawn(async move {
                 let mut interval = tokio::time::interval(std::time::Duration::from_millis(25));
@@ -213,9 +210,13 @@ pub fn run() {
             capture::snapshot_drop,
             ai::stream_chat,
             ai::cancel_chat,
+            ai::quick_vision,
             ai::fetch_models,
             ai::test_proxy,
             ai::test_key,
+            chess::analyze_chess_uci,
+            chess::start_chess_watcher,
+            chess::stop_chess_watcher,
             secrets::secret_get,
             secrets::secret_set,
         ])
