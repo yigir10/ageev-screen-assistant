@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { captureFull, clearChat, openChess, openHistory, openSettings, setMode, startSnip } from '$lib/actions';
+	import { captureFull, clearChat, openHistory, openSettings, setMode, startSnip } from '$lib/actions';
 	import { session, ui } from '$lib/state.svelte';
 
 	let { ondragstart }: { ondragstart: (e: PointerEvent) => void } = $props();
@@ -34,12 +34,6 @@
 		{#if session.messages.length}
 			<button type="button" title="Очистить чат" onclick={clearChat} class={btn}>✕</button>
 		{/if}
-		<button
-			type="button"
-			title="Шахматы (Stockfish 19)"
-			onclick={() => openChess()}
-			class="{btn} {ui.chessOpen ? 'border-accent text-accent' : ''}">♟</button
-		>
 		<button
 			type="button"
 			title="История"

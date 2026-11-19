@@ -3,16 +3,7 @@ import type { Mark } from './marks';
 export type Provider = 'gemini' | 'openrouter' | 'local';
 export type Mode = 'ghost' | 'interactive' | 'snipping';
 export type Phase = 'idle' | 'capturing' | 'thinking' | 'streaming';
-export type HotkeyName =
-	| 'full'
-	| 'snip'
-	| 'toggle'
-	| 'visibility'
-	| 'marks'
-	| 'cancel'
-	| 'preset'
-	| 'chessBoard'
-	| 'chessMove';
+export type HotkeyName = 'full' | 'snip' | 'toggle' | 'visibility' | 'marks' | 'cancel' | 'preset';
 export type Hotkeys = Record<HotkeyName, string>;
 
 export interface Preset {
@@ -26,13 +17,6 @@ export interface PinnedRegion {
 	y: number;
 	w: number;
 	h: number;
-}
-
-export interface ChessArrows {
-	best: string;
-	second: string | null;
-	evalText: string;
-	fen: string;
 }
 
 export interface ChatMessage {
@@ -59,18 +43,6 @@ export const PRESETS: Record<Provider, string[]> = {
 	local: ['local-model']
 };
 
-export const ALL_HOTKEYS: HotkeyName[] = [
-	'full',
-	'snip',
-	'toggle',
-	'visibility',
-	'marks',
-	'cancel',
-	'preset',
-	'chessBoard',
-	'chessMove'
-];
-
 export const DEFAULT_HOTKEYS: Hotkeys = {
 	full: 'Alt+Q',
 	snip: 'Alt+W',
@@ -78,9 +50,7 @@ export const DEFAULT_HOTKEYS: Hotkeys = {
 	visibility: 'Alt+H',
 	marks: 'Alt+M',
 	cancel: 'Alt+X',
-	preset: 'Alt+P',
-	chessBoard: 'Alt+B',
-	chessMove: 'Alt+C'
+	preset: 'Alt+P'
 };
 
 export const HOTKEY_LABELS: Record<HotkeyName, string> = {
@@ -88,11 +58,9 @@ export const HOTKEY_LABELS: Record<HotkeyName, string> = {
 	snip: 'Выделить область',
 	toggle: 'Ghost ⇄ Interactive',
 	visibility: 'Скрыть / показать HUD',
-	marks: 'Очистить метки и стрелки',
+	marks: 'Очистить метки',
 	cancel: 'Стоп генерации',
-	preset: 'Следующий пресет',
-	chessBoard: 'Шахматы: калибровать доску',
-	chessMove: 'Шахматы: ход Stockfish 19'
+	preset: 'Следующий пресет'
 };
 
 export const DEFAULT_PRESETS: Preset[] = [
@@ -152,16 +120,19 @@ const initialSettings = loadJson('stealth_hud_settings', {
 	panelWidth: 420,
 	panelPos: null as { x: number; y: number } | null,
 	pinnedRegion: null as PinnedRegion | null,
-	chessBoard: null as PinnedRegion | null,
-	chessBottom: 'white' as 'white' | 'black',
-	chessTurn: 'w' as 'w' | 'b',
-	stockfishPath: 'src-tauri/bin/stockfish.exe',
-	stockfishMovetime: 250,
-	chessAuto: false,
 	onboarded: false
 });
 
-initialSettings.hotkeys = { ...DEFAULT_HOTKEYS, ...initialSettings.hotkeys };
+initialSettings.hotkeys = {
+	full: initialSettings.hotkeys.full ?? DEFAULT_HOTKEYS.full,
+	snip: initialSettings.hotkeys.snip ?? DEFAULT_HOTKEYS.snip,
+	toggle: initialSettings.hotkeys.toggle ?? DEFAULT_HOTKEYS.toggle,
+	visibility: initialSettings.hotkeys.visibility ?? DEFAULT_HOTKEYS.visibility,
+	marks: initialSettings.hotkeys.marks ?? DEFAULT_HOTKEYS.marks,
+	cancel: initialSettings.hotkeys.cancel ?? DEFAULT_HOTKEYS.cancel,
+	preset: initialSettings.hotkeys.preset ?? DEFAULT_HOTKEYS.preset
+};
+
 if (!Array.isArray(initialSettings.presets) || !initialSettings.presets.length) {
 	initialSettings.presets = structuredClone(DEFAULT_PRESETS);
 }
@@ -176,13 +147,10 @@ export const ui = $state({
 	statusDetail: '',
 	settingsOpen: false,
 	historyOpen: false,
-	chessOpen: false,
 	recording: false,
 	dragging: false,
 	snipBg: '',
-	snipPurpose: 'region' as 'region' | 'board',
 	marks: [] as Mark[],
-	chessArrows: null as ChessArrows | null,
 	toasts: [] as { id: string; text: string; kind: 'info' | 'error' | 'ok' }[],
 	models: { gemini: [], openrouter: [], local: [] } as Record<Provider, string[]>,
 	secretsOk: false

@@ -1,6 +1,5 @@
 mod ai;
 mod capture;
-mod chess;
 mod secrets;
 mod win;
 
@@ -148,7 +147,6 @@ pub fn run() {
         .manage(ai::StreamState::default())
         .manage(capture::Snapshot::default())
         .manage(HitState::default())
-        .manage(chess::ChessWatcher::default())
         .setup(|app| {
             let w = app.get_webview_window("main").expect("main window");
             fit_primary_monitor(app.handle(), &w);
@@ -210,13 +208,9 @@ pub fn run() {
             capture::snapshot_drop,
             ai::stream_chat,
             ai::cancel_chat,
-            ai::quick_vision,
             ai::fetch_models,
             ai::test_proxy,
             ai::test_key,
-            chess::analyze_chess_uci,
-            chess::start_chess_watcher,
-            chess::stop_chess_watcher,
             secrets::secret_get,
             secrets::secret_set,
         ])

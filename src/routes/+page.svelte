@@ -3,8 +3,6 @@
 	import { onMount, untrack } from 'svelte';
 	import * as A from '$lib/actions';
 	import { settings, ui } from '$lib/state.svelte';
-	import ChessDrawer from '$lib/components/ChessDrawer.svelte';
-	import ChessLayer from '$lib/components/ChessLayer.svelte';
 	import HistoryDrawer from '$lib/components/HistoryDrawer.svelte';
 	import MarksLayer from '$lib/components/MarksLayer.svelte';
 	import Onboarding from '$lib/components/Onboarding.svelte';
@@ -43,7 +41,6 @@
 		const timer = setInterval(syncHitRects, 120);
 		return () => {
 			clearInterval(timer);
-			void A.stopChessWatcher();
 			unlisten.forEach((f) => f());
 		};
 	});
@@ -52,7 +49,6 @@
 		void ui.mode;
 		void ui.settingsOpen;
 		void ui.historyOpen;
-		void ui.chessOpen;
 		void ui.dragging;
 		void settings.onboarded;
 		void settings.panelPos;
@@ -83,19 +79,11 @@
 		untrack(() => void A.applyStealth());
 	});
 
-	$effect(() => {
-		void settings.chessAuto;
-		void $state.snapshot(settings.chessBoard);
-		void (ui.mode === 'snipping');
-		untrack(() => void A.syncChessWatcher());
-	});
-
 	function onkeydown(e: KeyboardEvent) {
 		if (e.key !== 'Escape') return;
 		if (ui.mode === 'snipping') void A.cancelSnip();
 		else if (ui.settingsOpen) ui.settingsOpen = false;
 		else if (ui.historyOpen) ui.historyOpen = false;
-		else if (ui.chessOpen) ui.chessOpen = false;
 		else if (ui.mode === 'interactive' && !ui.recording && settings.onboarded) void A.setMode('ghost');
 	}
 </script>
@@ -108,16 +96,12 @@
 		<SnipOverlay ondone={A.captureRegion} oncancel={A.cancelSnip} />
 	{:else}
 		{#if ui.marks.length}<MarksLayer />{/if}
-		<ChessLayer />
 		<Panel />
 		{#if ui.mode === 'interactive' && ui.settingsOpen}
 			<SettingsDrawer />
 		{/if}
 		{#if ui.mode === 'interactive' && ui.historyOpen}
 			<HistoryDrawer />
-		{/if}
-		{#if ui.mode === 'interactive' && ui.chessOpen}
-			<ChessDrawer />
 		{/if}
 		{#if ui.mode === 'interactive' && !settings.onboarded}
 			<Onboarding />

@@ -1,5 +1,4 @@
-//! Мульти-провайдерный стриминг: Gemini (нативный SSE), OpenRouter и Local (OpenAI-совместимые).
-//! Ответ уходит во фронтенд событиями: `ai-chunk`, `ai-status`, `ai-done`, `ai-error`.
+//! Мульти-провайдерный стриминг: Gemini, OpenRouter и Local.
 
 use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
@@ -78,6 +77,16 @@ fn local_base(cfg: &AiConfig) -> String {
 
 fn short(s: &str) -> String {
     s.chars().take(400).collect()
+}
+
+async fn read_json(resp: reqwest::Response) -> Result<Value, String> {
+    let st = resp.status();
+    let body = resp.text().await.map_err(|e| format!("Сеть (чтение ответа): {e}"))?;
+    if !st.is_success() {
+        return Err(format!("HTTP {st}: {}", short(&body)));
+    }
+    serde_json::from_str(&body)
+        .map_err(|e| format!("Ответ сервера не JSON ({e}): {}", short(&body)))
 }
 
 fn gemini_body(cfg: &AiConfig, msgs: &[ChatMsg]) -> Value {
@@ -214,7 +223,7 @@ async fn run_stream(app: &AppHandle, cfg: &AiConfig, msgs: &[ChatMsg], id: u64) 
     let mut stream = resp.bytes_stream();
     let mut buf: Vec<u8> = Vec::new();
     while let Some(chunk) = stream.next().await {
-        let chunk = chunk.map_err(|e| format!("Поток: {e}"))?;
+        let chunk = chunk.map_err(|e| format!("Обрыв потока: {e}"))?;
         buf.extend_from_slice(&chunk);
         while let Some(pos) = buf.iter().position(|b| *b == b'\n') {
             let raw: Vec<u8> = buf.drain(..=pos).collect();
@@ -281,12 +290,13 @@ pub async fn fetch_models(cfg: AiConfig) -> Result<Vec<String>, String> {
             if cfg.api_key.trim().is_empty() {
                 return Err("Сначала введите API-ключ".into());
             }
-            let v: Value = client
+            let resp = client
                 .get(format!("{GEMINI_BASE}/models?pageSize=200"))
                 .header("x-goog-api-key", cfg.api_key.trim())
-                .send().await.map_err(|e| format!("Сеть: {e}"))?
-                .error_for_status().map_err(|e| e.to_string())?
-                .json().await.map_err(|e| e.to_string())?;
+                .send()
+                .await
+                .map_err(|e| format!("Сеть: {e}"))?;
+            let v = read_json(resp).await?;
             for m in v["models"].as_array().into_iter().flatten() {
                 let can_generate = m["supportedGenerationMethods"]
                     .as_array()
@@ -298,11 +308,12 @@ pub async fn fetch_models(cfg: AiConfig) -> Result<Vec<String>, String> {
             }
         }
         "openrouter" => {
-            let v: Value = client
+            let resp = client
                 .get(format!("{OPENROUTER_BASE}/models"))
-                .send().await.map_err(|e| format!("Сеть: {e}"))?
-                .error_for_status().map_err(|e| e.to_string())?
-                .json().await.map_err(|e| e.to_string())?;
+                .send()
+                .await
+                .map_err(|e| format!("Сеть: {e}"))?;
+            let v = read_json(resp).await?;
             for m in v["data"].as_array().into_iter().flatten() {
                 let vision = m["architecture"]["input_modalities"]
                     .as_array()
@@ -314,11 +325,12 @@ pub async fn fetch_models(cfg: AiConfig) -> Result<Vec<String>, String> {
             }
         }
         "local" => {
-            let v: Value = client
+            let resp = client
                 .get(format!("{}/models", local_base(&cfg)))
-                .send().await.map_err(|e| format!("Сеть: {e}"))?
-                .error_for_status().map_err(|e| e.to_string())?
-                .json().await.map_err(|e| e.to_string())?;
+                .send()
+                .await
+                .map_err(|e| format!("Сеть: {e}"))?;
+            let v = read_json(resp).await?;
             for m in v["data"].as_array().into_iter().flatten() {
                 if let Some(id) = m["id"].as_str() {
                     ids.push(id.to_string());
@@ -346,7 +358,9 @@ pub async fn test_proxy(proxy: String) -> Result<u64, String> {
     let t = std::time::Instant::now();
     client
         .get("https://www.google.com/generate_204")
-        .send().await.map_err(|e| format!("Нет соединения: {e}"))?;
+        .send()
+        .await
+        .map_err(|e| format!("Нет соединения: {e}"))?;
     Ok(t.elapsed().as_millis() as u64)
 }
 
@@ -372,98 +386,6 @@ pub async fn test_key(cfg: AiConfig) -> Result<u64, String> {
         other => return Err(format!("Неизвестный провайдер: {other}")),
     };
     let resp = req.send().await.map_err(|e| format!("Сеть: {e}"))?;
-    if !resp.status().is_success() {
-        let st = resp.status();
-        let body = resp.text().await.unwrap_or_default();
-        return Err(format!("HTTP {st}: {}", short(&body)));
-    }
+    let _ = read_json(resp).await?;
     Ok(t.elapsed().as_millis() as u64)
-}
-
-
-/// Быстрый однократный vision-запрос без стриминга (используется для извлечения FEN шахматной доски).
-#[tauri::command]
-pub async fn quick_vision(cfg: AiConfig, prompt: String, image: String) -> Result<String, String> {
-    if cfg.provider != "local" && cfg.api_key.trim().is_empty() {
-        return Err("Не задан API-ключ (Настройки → Провайдер)".into());
-    }
-    let client = build_client(&cfg, Some(Duration::from_secs(25)))?;
-
-    match cfg.provider.as_str() {
-        "gemini" => {
-            let model = cfg.model.trim().trim_start_matches("models/");
-            let body = json!({
-                "contents": [{
-                    "parts": [
-                        { "inline_data": { "mime_type": "image/jpeg", "data": image } },
-                        { "text": prompt }
-                    ]
-                }]
-            });
-            let resp = client
-                .post(format!("{GEMINI_BASE}/models/{model}:generateContent"))
-                .header("x-goog-api-key", cfg.api_key.trim())
-                .json(&body)
-                .send()
-                .await
-                .map_err(|e| format!("Сеть: {e}"))?;
-            if !resp.status().is_success() {
-                let st = resp.status();
-                let txt = resp.text().await.unwrap_or_default();
-                return Err(format!("HTTP {st}: {}", short(&txt)));
-            }
-            let v: Value = resp.json().await.map_err(|e| e.to_string())?;
-            let mut out = String::new();
-            if let Some(parts) = v["candidates"][0]["content"]["parts"].as_array() {
-                for p in parts {
-                    if p["thought"].as_bool() == Some(true) {
-                        continue;
-                    }
-                    if let Some(t) = p["text"].as_str() {
-                        out.push_str(t);
-                    }
-                }
-            }
-            let trimmed = out.trim().to_string();
-            if trimmed.is_empty() {
-                Err("Пустой ответ от Gemini".into())
-            } else {
-                Ok(trimmed)
-            }
-        }
-        "openrouter" | "local" => {
-            let url = if cfg.provider == "openrouter" {
-                format!("{OPENROUTER_BASE}/chat/completions")
-            } else {
-                format!("{}/chat/completions", local_base(&cfg))
-            };
-            let body = json!({
-                "model": cfg.model,
-                "messages": [{
-                    "role": "user",
-                    "content": [
-                        { "type": "text", "text": prompt },
-                        { "type": "image_url", "image_url": { "url": format!("data:image/jpeg;base64,{image}") } }
-                    ]
-                }]
-            });
-            let mut req = client.post(url).json(&body);
-            if !cfg.api_key.trim().is_empty() {
-                req = req.bearer_auth(cfg.api_key.trim());
-            }
-            let resp = req.send().await.map_err(|e| format!("Сеть: {e}"))?;
-            if !resp.status().is_success() {
-                let st = resp.status();
-                let txt = resp.text().await.unwrap_or_default();
-                return Err(format!("HTTP {st}: {}", short(&txt)));
-            }
-            let v: Value = resp.json().await.map_err(|e| e.to_string())?;
-            v["choices"][0]["message"]["content"]
-                .as_str()
-                .map(|s| s.trim().to_string())
-                .filter(|s| !s.is_empty())
-                .ok_or_else(|| "Пустой ответ от модели".into())
-        }
-        other => Err(format!("Неизвестный провайдер: {other}")),
-    }
 }
