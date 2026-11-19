@@ -1,0 +1,35 @@
+[package]
+name = "stealth-hud"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+name = "stealth_hud_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["tray-icon"] }
+tauri-plugin-global-shortcut = "2"
+tauri-plugin-single-instance = "2"
+tauri-plugin-autostart = "2"
+keyring = { version = "3", features = ["windows-native"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["rt-multi-thread", "time", "macros"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "socks", "rustls-tls"] }
+futures-util = "0.3"
+xcap = "0.7"
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
+base64 = "0.22"
+
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true

@@ -1,0 +1,52 @@
+@import 'tailwindcss';
+
+@theme {
+	--color-hud: rgba(10, 12, 18, 0.82);
+	--color-hud-solid: #0b0d12;
+	--color-surface: #151922;
+	--color-line: rgba(255, 255, 255, 0.08);
+	--color-fg: #e6e9f0;
+	--color-muted: #8b93a7;
+	--color-accent: #6ee7b7;
+	--color-accent2: #818cf8;
+	--color-danger: #f87171;
+	--color-warn: #fbbf24;
+	--font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif;
+	--font-mono: 'JetBrains Mono', 'Cascadia Code', Consolas, monospace;
+	--radius-panel: 14px;
+	--radius-ctl: 8px;
+}
+
+html,
+body {
+	background: transparent !important; /* WebView полностью прозрачный */
+	margin: 0;
+	height: 100%;
+	overflow: hidden;
+	font-family: var(--font-sans);
+	color: var(--color-fg);
+}
+
+button,
+input,
+textarea {
+	font-family: inherit;
+}
+
+/* Мигающий курсор стрима */
+.caret {
+	animation: caret-blink 1s steps(2, start) infinite;
+	color: var(--color-accent);
+}
+@keyframes caret-blink {
+	to {
+		visibility: hidden;
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	* {
+		animation-duration: 0.01ms !important;
+		transition-duration: 0.01ms !important;
+	}
+}
